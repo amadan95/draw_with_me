@@ -37,6 +37,54 @@ export type StrokeTiming = {
   pauseAfterMs?: number;
 };
 
+export type RenderHint =
+  | "stacked_rect"
+  | "puff_chain"
+  | "tuft_cluster"
+  | "oval_cluster"
+  | "tapered_strip";
+
+export type ObjectSize = "small" | "medium" | "large";
+
+export type ObjectBoundingBox = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type ObjectProposal = {
+  id: string;
+  label: string;
+  reason: string;
+  anchor: [number, number];
+  bbox: ObjectBoundingBox;
+  size: ObjectSize;
+  priority: number;
+  renderHint: RenderHint;
+};
+
+export type SceneAnalysis = {
+  scene: string;
+  why: string;
+  additions: ObjectProposal[];
+};
+
+export type CompiledObjectAction = {
+  tool: "brush";
+  color: string;
+  width: number;
+  opacity: number;
+  points: [number, number][];
+  timing?: StrokeTiming;
+};
+
+export type CompiledObjectPlan = {
+  objectId: string;
+  label: string;
+  actions: CompiledObjectAction[];
+};
+
 export type HumanStroke = DrawingBase & {
   kind: "humanStroke";
   tool: "draw" | "erase";
@@ -49,6 +97,8 @@ export type AiStroke = DrawingBase & {
   size: number;
   points: Point[];
   label?: string;
+  objectId?: string;
+  objectLabel?: string;
   timing?: StrokeTiming;
 };
 
@@ -152,6 +202,58 @@ export const pointSchema = z.object({
   pressure: z.number().finite().optional()
 });
 
+export const renderHintSchema = z.enum([
+  "stacked_rect",
+  "puff_chain",
+  "tuft_cluster",
+  "oval_cluster",
+  "tapered_strip"
+]);
+
+export const objectBoundingBoxSchema = z.object({
+  x: z.number().finite(),
+  y: z.number().finite(),
+  width: z.number().positive(),
+  height: z.number().positive()
+});
+
+export const objectProposalSchema = z.object({
+  id: z.string(),
+  label: z.string().min(1).max(80),
+  reason: z.string().min(1).max(160),
+  anchor: z.tuple([z.number().finite(), z.number().finite()]),
+  bbox: objectBoundingBoxSchema,
+  size: z.enum(["small", "medium", "large"]),
+  priority: z.number().int().min(1).max(9),
+  renderHint: renderHintSchema
+});
+
+export const sceneAnalysisSchema = z.object({
+  scene: z.string().min(1).max(160),
+  why: z.string().min(1).max(200),
+  additions: z.array(objectProposalSchema).max(3)
+});
+
+export const compiledObjectActionSchema = z.object({
+  tool: z.literal("brush"),
+  color: z.string(),
+  width: z.number().positive().max(24),
+  opacity: z.number().min(0.05).max(1),
+  points: z.array(z.tuple([z.number().finite(), z.number().finite()])).min(2).max(12),
+  timing: z
+    .object({
+      speed: z.number().min(0.2).max(3).optional(),
+      pauseAfterMs: z.number().int().min(0).max(1200).optional()
+    })
+    .optional()
+});
+
+export const compiledObjectPlanSchema = z.object({
+  objectId: z.string(),
+  label: z.string().min(1).max(80),
+  actions: z.array(compiledObjectActionSchema).max(4)
+});
+
 export const humanStrokeSchema = z.object({
   id: z.string(),
   createdAt: z.number(),
@@ -171,6 +273,8 @@ export const aiStrokeSchema = z.object({
   size: z.number().positive(),
   points: z.array(pointSchema).min(2),
   label: z.string().optional(),
+  objectId: z.string().optional(),
+  objectLabel: z.string().optional(),
   timing: z
     .object({
       speed: z.number().min(0.2).max(3).optional(),
