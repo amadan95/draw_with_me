@@ -769,7 +769,8 @@ function validateRenderHintStructure(
 
 function validateCompiledPlan(
   plan: CompiledObjectPlan,
-  proposal: ObjectProposal
+  proposal: ObjectProposal,
+  input: DrawRequest
 ) {
   if (plan.actions.length === 0) {
     return { ok: false as const, reason: "compiled object returned no actions" };
@@ -816,6 +817,11 @@ function validateCompiledPlan(
 
   if (requiresEdgeContact(proposal) && !touchesProposalEdge(bounds, proposal)) {
     return { ok: false as const, reason: "attached object does not meet a bbox edge" };
+  }
+
+  const attachmentReason = validateAttachmentToHumanDrawing(bounds, proposal, input);
+  if (attachmentReason) {
+    return { ok: false as const, reason: attachmentReason };
   }
 
   return { ok: true as const };
@@ -888,6 +894,128 @@ function adjustFallbackBoundingBox(
   }
 
   return proposal.bbox;
+}
+
+function contextualizeProposal(
+  proposal: ObjectProposal,
+  input: DrawRequest
+): ObjectProposal {
+  const bounds = extractHumanBounds(input);
+  if (!bounds) {
+    return proposal;
+  }
+
+  const text = `${proposal.label} ${proposal.reason}`.toLowerCase();
+  const width = proposal.bbox.width;
+  const height = proposal.bbox.height;
+  let x = proposal.bbox.x;
+  let y = proposal.bbox.y;
+
+  if (includesAny(text, ["chimney", "antenna", "roof"])) {
+    const desiredBottom = bounds.minY + bounds.height * 0.24;
+    const desiredCenterX = clamp(
+      proposal.anchor[0],
+      bounds.minX + width * 0.4,
+      bounds.maxX - width * 0.4
+    );
+    x = Math.round(desiredCenterX - width * 0.5);
+    y = Math.round(desiredBottom - height);
+  } else if (includesAny(text, ["path", "walkway", "trail", "road"])) {
+    const desiredTop = bounds.maxY - height * 0.06;
+    const desiredCenterX = clamp(
+      proposal.anchor[0],
+      bounds.minX + width * 0.4,
+      bounds.maxX - width * 0.4
+    );
+    x = Math.round(desiredCenterX - width * 0.5);
+    y = Math.round(desiredTop);
+  } else if (includesAny(text, ["door", "window"])) {
+    const desiredCenterX = clamp(
+      proposal.anchor[0],
+      bounds.minX + width * 0.5,
+      bounds.maxX - width * 0.5
+    );
+    const desiredCenterY = clamp(
+      proposal.anchor[1],
+      bounds.minY + height * 0.8,
+      bounds.maxY - height * 0.5
+    );
+    x = Math.round(desiredCenterX - width * 0.5);
+    y = Math.round(desiredCenterY - height * 0.5);
+  }
+
+  const bbox = {
+    x: Math.round(clamp(x, 0, Math.max(0, input.canvasWidth - width))),
+    y: Math.round(clamp(y, 0, Math.max(0, input.canvasHeight - height))),
+    width,
+    height
+  };
+
+  return objectProposalSchema.parse({
+    ...proposal,
+    bbox,
+    anchor: [
+      Math.round(bbox.x + bbox.width * 0.5),
+      Math.round(bbox.y + bbox.height * 0.5)
+    ] as [number, number]
+  });
+}
+
+function validateAttachmentToHumanDrawing(
+  bounds: ObjectBoundingBox,
+  proposal: ObjectProposal,
+  input: DrawRequest
+) {
+  const humanBounds = extractHumanBounds(input);
+  if (!humanBounds) {
+    return null;
+  }
+
+  const text = `${proposal.label} ${proposal.reason}`.toLowerCase();
+  const centerX = bounds.x + bounds.width * 0.5;
+  const centerY = bounds.y + bounds.height * 0.5;
+  const top = bounds.y;
+  const bottom = bounds.y + bounds.height;
+
+  if (includesAny(text, ["chimney", "antenna", "roof"])) {
+    const minBottom = humanBounds.minY + humanBounds.height * 0.1;
+    const maxBottom = humanBounds.minY + humanBounds.height * 0.4;
+    if (bottom < minBottom || bottom > maxBottom) {
+      return "top attachment does not meet the roof band";
+    }
+    if (centerX < humanBounds.minX || centerX > humanBounds.maxX) {
+      return "top attachment is outside the drawing span";
+    }
+    return null;
+  }
+
+  if (includesAny(text, ["path", "walkway", "trail", "road"])) {
+    const minTop = humanBounds.maxY - humanBounds.height * 0.18;
+    const maxTop = humanBounds.maxY + humanBounds.height * 0.1;
+    if (top < minTop || top > maxTop) {
+      return "ground attachment is not connected near the base of the drawing";
+    }
+    if (
+      centerX < humanBounds.minX - humanBounds.width * 0.15 ||
+      centerX > humanBounds.maxX + humanBounds.width * 0.15
+    ) {
+      return "ground attachment is outside the drawing span";
+    }
+    return null;
+  }
+
+  if (includesAny(text, ["door", "window"])) {
+    if (
+      centerX < humanBounds.minX ||
+      centerX > humanBounds.maxX ||
+      centerY < humanBounds.minY + humanBounds.height * 0.15 ||
+      centerY > humanBounds.maxY
+    ) {
+      return "interior attachment falls outside the main drawing body";
+    }
+  }
+
+  return null;
 }
 
 function buildRenderHintFallbackPlan(
@@ -1474,17 +1602,18 @@ export async function compileObjectDrawing(
   proposal: ObjectProposal
 ): Promise<CompiledObjectResult | null> {
   const gemini = getGeminiConfig();
+  const contextualProposal = contextualizeProposal(proposal, input);
 
-  const fallbackPlan = buildRenderHintFallbackPlan(proposal, input);
+  const fallbackPlan = buildRenderHintFallbackPlan(contextualProposal, input);
 
   if (!gemini) {
     if (fallbackPlan) {
       console.info("[draw-ai] Gemini not configured; using render-hint fallback", {
-        object: proposal.label,
-        renderHint: proposal.renderHint
+        object: contextualProposal.label,
+        renderHint: contextualProposal.renderHint
       });
       return {
-        proposal,
+        proposal: contextualProposal,
         plan: fallbackPlan,
         source: "fallback"
       };
@@ -1494,7 +1623,7 @@ export async function compileObjectDrawing(
   }
 
   const tryValidate = (plan: CompiledObjectPlan) => {
-    const validation = validateCompiledPlan(plan, proposal);
+    const validation = validateCompiledPlan(plan, contextualProposal, input);
     if (!validation.ok) {
       throw new Error(validation.reason);
     }
@@ -1504,40 +1633,40 @@ export async function compileObjectDrawing(
   try {
     const rawCompile = await callGeminiJson({
       gemini,
-      systemText: buildCompileSystemPrompt(proposal),
-      userText: buildCompileUserPayload(input, analysis, proposal),
+      systemText: buildCompileSystemPrompt(contextualProposal),
+      userText: buildCompileUserPayload(input, analysis, contextualProposal),
       imageDataUrl: input.snapshotBase64,
       temperature: 0.14,
       maxOutputTokens: 2048
     });
 
     console.info("[draw-ai] raw object compile response", {
-      object: proposal.label,
+      object: contextualProposal.label,
       response: rawCompile.slice(0, 1200)
     });
 
     try {
-      const compiled = tryValidate(parseCompiledObjectPlan(rawCompile, proposal, input));
+      const compiled = tryValidate(parseCompiledObjectPlan(rawCompile, contextualProposal, input));
       console.info("[draw-ai] object compile accepted", {
-        object: proposal.label,
+        object: contextualProposal.label,
         actionCount: compiled.actions.length
       });
       return {
-        proposal,
+        proposal: contextualProposal,
         plan: compiled,
         source: "model"
       };
     } catch (error) {
       try {
-        const salvaged = salvageCompiledActions(rawCompile, proposal, input);
+        const salvaged = salvageCompiledActions(rawCompile, contextualProposal, input);
         if (salvaged.actions.length > 0) {
           const compiled = tryValidate(salvaged);
           console.info("[draw-ai] salvaged partial object compile", {
-            object: proposal.label,
+            object: contextualProposal.label,
             actionCount: compiled.actions.length
           });
           return {
-            proposal,
+            proposal: contextualProposal,
             plan: compiled,
             source: "model"
           };
@@ -1548,20 +1677,20 @@ export async function compileObjectDrawing(
 
       console.warn(
         "[draw-ai] object compile validation failed",
-        proposal.label,
+        contextualProposal.label,
         error instanceof Error ? error.message : error
       );
     }
 
     console.info("[draw-ai] attempting object compile repair", {
-      object: proposal.label
+      object: contextualProposal.label
     });
     const repaired = await callGeminiJson({
       gemini,
       systemText: buildCompileRepairSystemPrompt(),
       userText: buildRepairUserPayload(rawCompile, {
         scene: analysis.scene,
-        object: proposal,
+        object: contextualProposal,
         canvas: {
           width: input.canvasWidth,
           height: input.canvasHeight
@@ -1572,50 +1701,50 @@ export async function compileObjectDrawing(
     });
 
     console.info("[draw-ai] raw object compile repair response", {
-      object: proposal.label,
+      object: contextualProposal.label,
       response: repaired.slice(0, 1200)
     });
 
     try {
-      const compiled = tryValidate(parseCompiledObjectPlan(repaired, proposal, input));
+      const compiled = tryValidate(parseCompiledObjectPlan(repaired, contextualProposal, input));
       console.info("[draw-ai] repaired object compile accepted", {
-        object: proposal.label,
+        object: contextualProposal.label,
         actionCount: compiled.actions.length
       });
       return {
-        proposal,
+        proposal: contextualProposal,
         plan: compiled,
         source: "model"
       };
     } catch (repairError) {
       console.warn(
         "[draw-ai] object compile repair failed",
-        proposal.label,
+        contextualProposal.label,
         repairError instanceof Error ? repairError.message : repairError
       );
     }
   } catch (error) {
     console.error(
       "[draw-ai] object compile request failed",
-      proposal.label,
+      contextualProposal.label,
       error instanceof Error ? error.message : error
     );
   }
 
   if (fallbackPlan) {
     console.info("[draw-ai] using render-hint fallback", {
-      object: proposal.label,
-      renderHint: proposal.renderHint
+      object: contextualProposal.label,
+      renderHint: contextualProposal.renderHint
     });
     return {
-      proposal,
+      proposal: contextualProposal,
       plan: fallbackPlan,
       source: "fallback"
     };
   }
 
   console.info("[draw-ai] skipping object with no valid compile or fallback", {
-    object: proposal.label
+    object: contextualProposal.label
   });
   return null;
 }
