@@ -2,6 +2,7 @@
 .next-dev
 node_modules
 .DS_Store
+.codex
 .env
 .env.local
 .env.development.local
