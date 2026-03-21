@@ -45,6 +45,26 @@ export type ObjectBoundingBox = {
 };
 
 export type ObjectFamily = string;
+export type OrientationHint =
+  | "horizontal"
+  | "vertical"
+  | "diagonal_left"
+  | "diagonal_right"
+  | "arched"
+  | "floating"
+  | "upright";
+
+export type PlacementHint = {
+  xRatio?: number;
+  yRatio?: number;
+  biasX?: number;
+  biasY?: number;
+};
+
+export type ScaleHint = {
+  widthRatio?: number;
+  heightRatio?: number;
+};
 
 export type PlacementRelation =
   | "attach_roof_left"
@@ -72,6 +92,9 @@ export type SceneAddition = {
   family: ObjectFamily;
   targetSubjectId?: string;
   relation: PlacementRelation;
+  placementHint?: PlacementHint;
+  scaleHint?: ScaleHint;
+  orientationHint?: OrientationHint;
   reason: string;
   priority: number;
 };
@@ -98,6 +121,72 @@ export type RenderedRecipe = {
   actions: CompiledObjectAction[];
 };
 
+export type PlannedStrokeEvent = {
+  type: "stroke";
+  color: string;
+  width: number;
+  opacity?: number;
+  points: [number, number][];
+  timing?: StrokeTiming;
+  label?: string;
+  objectLabel?: string;
+};
+
+export type PlannedShapeEvent = {
+  type: "shape";
+  shape: ShapeKind;
+  color: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation?: number;
+  fill?: string;
+  strokeWidth?: number;
+};
+
+export type PlannedAsciiBlockEvent = {
+  type: "ascii_block";
+  color: string;
+  x: number;
+  y: number;
+  text: string;
+  fontSize: number;
+  width?: number;
+};
+
+export type PlannedSayEvent = {
+  type: "say";
+  text: string;
+};
+
+export type PlannedSetPaletteEvent = {
+  type: "set_palette";
+  index: number;
+};
+
+export type PlannedCommentReplyEvent = {
+  type: "comment_reply";
+  text: string;
+};
+
+export type PlannedDrawEvent =
+  | PlannedStrokeEvent
+  | PlannedShapeEvent
+  | PlannedAsciiBlockEvent
+  | PlannedSayEvent
+  | PlannedSetPaletteEvent
+  | PlannedCommentReplyEvent;
+
+export type GeminiDrawPlan = {
+  thinking?: string;
+  narration?: string;
+  summary?: string;
+  previewSaw?: string;
+  previewDrawing?: string;
+  events: PlannedDrawEvent[];
+};
+
 export type HumanStroke = DrawingBase & {
   kind: "humanStroke";
   tool: "draw" | "erase";
@@ -115,7 +204,14 @@ export type AiStroke = DrawingBase & {
   timing?: StrokeTiming;
 };
 
-export type ShapeKind = "rect" | "circle" | "line" | "arrow" | "scribble";
+export type ShapeKind =
+  | "rect"
+  | "circle"
+  | "line"
+  | "arrow"
+  | "scribble"
+  | "triangle"
+  | "trapezoid";
 
 export type ShapeElement = DrawingBase & {
   kind: "shape";
@@ -216,6 +312,27 @@ export const pointSchema = z.object({
 });
 
 export const objectFamilySchema = z.string().min(1).max(80);
+export const orientationHintSchema = z.enum([
+  "horizontal",
+  "vertical",
+  "diagonal_left",
+  "diagonal_right",
+  "arched",
+  "floating",
+  "upright"
+]);
+
+export const placementHintSchema = z.object({
+  xRatio: z.number().min(0).max(1).optional(),
+  yRatio: z.number().min(0).max(1).optional(),
+  biasX: z.number().min(-1).max(1).optional(),
+  biasY: z.number().min(-1).max(1).optional()
+});
+
+export const scaleHintSchema = z.object({
+  widthRatio: z.number().min(0.05).max(1.25).optional(),
+  heightRatio: z.number().min(0.05).max(1.25).optional()
+});
 
 export const placementRelationSchema = z.enum([
   "attach_roof_left",
@@ -251,6 +368,9 @@ export const sceneAdditionSchema = z.object({
   family: objectFamilySchema,
   targetSubjectId: z.string().optional(),
   relation: placementRelationSchema,
+  placementHint: placementHintSchema.optional(),
+  scaleHint: scaleHintSchema.optional(),
+  orientationHint: orientationHintSchema.optional(),
   reason: z.string().min(1).max(160),
   priority: z.number().int().min(1).max(9)
 });
@@ -267,13 +387,85 @@ export const compiledObjectActionSchema = z.object({
   color: z.string(),
   width: z.number().positive().max(24),
   opacity: z.number().min(0.05).max(1),
-  points: z.array(z.tuple([z.number().finite(), z.number().finite()])).min(2).max(12),
+  points: z.array(z.tuple([z.number().finite(), z.number().finite()])).min(2).max(20),
   timing: z
     .object({
       speed: z.number().min(0.2).max(3).optional(),
       pauseAfterMs: z.number().int().min(0).max(1200).optional()
     })
     .optional()
+});
+
+export const plannedStrokeEventSchema = z.object({
+  type: z.literal("stroke"),
+  color: z.string(),
+  width: z.number().positive().max(24),
+  opacity: z.number().min(0.05).max(1).optional(),
+  points: z.array(z.tuple([z.number().finite(), z.number().finite()])).min(2).max(80),
+  timing: z
+    .object({
+      speed: z.number().min(0.2).max(3).optional(),
+      pauseAfterMs: z.number().int().min(0).max(1200).optional()
+    })
+    .optional(),
+  label: z.string().max(120).optional(),
+  objectLabel: z.string().max(80).optional()
+});
+
+export const plannedShapeEventSchema = z.object({
+  type: z.literal("shape"),
+  shape: z.enum(["rect", "circle", "line", "arrow", "scribble", "triangle", "trapezoid"]),
+  color: z.string(),
+  x: z.number().finite(),
+  y: z.number().finite(),
+  width: z.number().finite(),
+  height: z.number().finite(),
+  rotation: z.number().finite().optional(),
+  fill: z.string().optional(),
+  strokeWidth: z.number().positive().max(24).optional()
+});
+
+export const plannedAsciiBlockEventSchema = z.object({
+  type: z.literal("ascii_block"),
+  color: z.string(),
+  x: z.number().finite(),
+  y: z.number().finite(),
+  text: z.string().min(1).max(240),
+  fontSize: z.number().positive().max(96),
+  width: z.number().finite().positive().optional()
+});
+
+export const plannedSayEventSchema = z.object({
+  type: z.literal("say"),
+  text: z.string().min(1).max(240)
+});
+
+export const plannedSetPaletteEventSchema = z.object({
+  type: z.literal("set_palette"),
+  index: z.number().int().min(0).max(7)
+});
+
+export const plannedCommentReplyEventSchema = z.object({
+  type: z.literal("comment_reply"),
+  text: z.string().min(1).max(240)
+});
+
+export const plannedDrawEventSchema = z.union([
+  plannedStrokeEventSchema,
+  plannedShapeEventSchema,
+  plannedAsciiBlockEventSchema,
+  plannedSayEventSchema,
+  plannedSetPaletteEventSchema,
+  plannedCommentReplyEventSchema
+]);
+
+export const geminiDrawPlanSchema = z.object({
+  thinking: z.string().max(240).optional(),
+  narration: z.string().max(240).optional(),
+  summary: z.string().max(240).optional(),
+  previewSaw: z.string().max(240).optional(),
+  previewDrawing: z.string().max(240).optional(),
+  events: z.array(plannedDrawEventSchema).max(32)
 });
 
 export const humanStrokeSchema = z.object({
@@ -310,7 +502,7 @@ export const shapeSchema = z.object({
   createdAt: z.number(),
   color: z.string(),
   kind: z.literal("shape"),
-  shape: z.enum(["rect", "circle", "line", "arrow", "scribble"]),
+  shape: z.enum(["rect", "circle", "line", "arrow", "scribble", "triangle", "trapezoid"]),
   x: z.number().finite(),
   y: z.number().finite(),
   width: z.number().finite(),
@@ -358,7 +550,7 @@ export const turnSummarySchema = z.object({
 
 const plannerPointTupleSchema = z.tuple([z.number().finite(), z.number().finite()]);
 
-const plannerHumanStrokeContextSchema = z.object({
+export const plannerHumanStrokeContextSchema = z.object({
   kind: z.literal("humanStroke"),
   tool: z.union([z.literal("draw"), z.literal("erase")]),
   color: z.string(),
@@ -366,7 +558,7 @@ const plannerHumanStrokeContextSchema = z.object({
   points: z.array(plannerPointTupleSchema).min(1).max(24)
 });
 
-const plannerAsciiContextSchema = z.object({
+export const plannerAsciiContextSchema = z.object({
   kind: z.literal("asciiBlock"),
   color: z.string(),
   fontSize: z.number().positive(),
@@ -375,9 +567,9 @@ const plannerAsciiContextSchema = z.object({
   text: z.string().max(80)
 });
 
-const plannerShapeContextSchema = z.object({
+export const plannerShapeContextSchema = z.object({
   kind: z.literal("shape"),
-  shape: z.enum(["rect", "circle", "line", "arrow", "scribble"]),
+  shape: z.enum(["rect", "circle", "line", "arrow", "scribble", "triangle", "trapezoid"]),
   color: z.string(),
   x: z.number().finite(),
   y: z.number().finite(),
@@ -386,12 +578,21 @@ const plannerShapeContextSchema = z.object({
   strokeWidth: z.number().finite()
 });
 
-const plannerAiStrokeContextSchema = z.object({
+export const plannerAiStrokeContextSchema = z.object({
   color: z.string(),
   width: z.number().positive(),
   opacity: z.number().min(0.05).max(1),
   points: z.array(plannerPointTupleSchema).min(1).max(24)
 });
+
+export type PlannerHumanStrokeContext = z.infer<typeof plannerHumanStrokeContextSchema>;
+export type PlannerAsciiContext = z.infer<typeof plannerAsciiContextSchema>;
+export type PlannerShapeContext = z.infer<typeof plannerShapeContextSchema>;
+export type PlannerHumanContext =
+  | PlannerHumanStrokeContext
+  | PlannerAsciiContext
+  | PlannerShapeContext;
+export type PlannerAiContext = z.infer<typeof plannerAiStrokeContextSchema>;
 
 export const drawRequestSchema = z.object({
   snapshotBase64: z.string().startsWith("data:image/"),

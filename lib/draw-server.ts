@@ -1,15 +1,19 @@
 import {
   type DrawRequestMode,
   type DrawStreamEvent,
+  type GeminiDrawPlan,
+  type PlannedDrawEvent,
   type RenderedRecipe,
   type SceneAddition,
   aiStrokeSchema,
+  asciiBlockSchema,
   commentPinSchema,
   createId,
   drawRequestSchema,
+  shapeSchema,
   type SceneAnalysis
 } from "@/lib/draw-types";
-import { analyzeScene } from "@/lib/ai";
+import { analyzeScene, generateDrawPlan } from "@/lib/ai";
 import { describeRenderedAddition, renderSceneAddition } from "@/lib/sketch-renderer";
 import { getRequestIdentity } from "@/lib/auth";
 import { loadingMessages } from "@/lib/loading-messages";
@@ -188,6 +192,125 @@ function renderedRecipeToEvents(
   return events;
 }
 
+function planHasVisualEvents(plan: GeminiDrawPlan) {
+  return plan.events.some(
+    (event) =>
+      event.type === "stroke" ||
+      event.type === "shape" ||
+      event.type === "ascii_block"
+  );
+}
+
+function buildPlanSummary(plan: GeminiDrawPlan) {
+  if (plan.summary) {
+    return plan.summary;
+  }
+
+  const visualLabels = plan.events
+    .filter(
+      (event): event is Extract<PlannedDrawEvent, { type: "stroke" }> =>
+        event.type === "stroke"
+    )
+    .map((event) => event.label ?? event.objectLabel ?? "a drawing")
+    .slice(0, 4);
+
+  if (visualLabels.length > 0) {
+    return `I added ${formatLabelList(visualLabels)}.`;
+  }
+
+  return plan.narration ?? "I added to the drawing.";
+}
+
+function plannedEventToStreamEvents(
+  event: PlannedDrawEvent,
+  input: ReturnType<typeof drawRequestSchema.parse>
+): DrawStreamEvent[] {
+  if (event.type === "stroke") {
+    ensureColor(event.color, input.palette);
+    const stroke = aiStrokeSchema.parse({
+      id: createId("ai-stroke"),
+      createdAt: Date.now(),
+      kind: "aiStroke",
+      color: event.color,
+      opacity: event.opacity ?? 0.92,
+      size: event.width,
+      points: event.points.map(([x, y]) => {
+        ensureInBounds(x, input.canvasWidth, "Point x");
+        ensureInBounds(y, input.canvasHeight, "Point y");
+        return { x, y };
+      }),
+      label: event.label,
+      objectLabel: event.objectLabel,
+      timing: event.timing
+    });
+
+    return [{ type: "stroke", stroke }];
+  }
+
+  if (event.type === "shape") {
+    ensureColor(event.color, input.palette);
+    const shape = shapeSchema.parse({
+      id: createId("ai-shape"),
+      createdAt: Date.now(),
+      color: event.color,
+      kind: "shape",
+      shape: event.shape,
+      x: event.x,
+      y: event.y,
+      width: event.width,
+      height: event.height,
+      rotation: event.rotation,
+      fill: event.fill,
+      strokeWidth: event.strokeWidth
+    });
+
+    ensureInBounds(shape.x, input.canvasWidth, "Shape x");
+    ensureInBounds(shape.y, input.canvasHeight, "Shape y");
+
+    return [{ type: "shape", shape }];
+  }
+
+  if (event.type === "ascii_block") {
+    ensureColor(event.color, input.palette);
+    const block = asciiBlockSchema.parse({
+      id: createId("ai-ascii"),
+      createdAt: Date.now(),
+      color: event.color,
+      kind: "asciiBlock",
+      x: event.x,
+      y: event.y,
+      text: event.text,
+      fontSize: event.fontSize,
+      width: event.width
+    });
+
+    ensureInBounds(block.x, input.canvasWidth, "ASCII block x");
+    ensureInBounds(block.y, input.canvasHeight, "ASCII block y");
+
+    return [{ type: "ascii_block", block }];
+  }
+
+  if (event.type === "say") {
+    return [{ type: "say", text: event.text }];
+  }
+
+  if (event.type === "set_palette") {
+    return [{ type: "set_palette", index: event.index }];
+  }
+
+  if (event.type === "comment_reply" && input.targetCommentId) {
+    return [
+      {
+        type: "comment_reply",
+        commentId: input.targetCommentId,
+        text: event.text
+      }
+    ];
+  }
+
+  return [];
+}
+
 export async function handleDrawRequest(
   request: Request,
   mode: DrawRequestMode
@@ -259,6 +382,62 @@ export async function handleDrawRequest(
           type: "thinking",
           text: pickLoadingMessage()
         });
+
+        const plan = await generateDrawPlan(turnInput);
+
+        if (plan?.thinking || plan?.previewSaw) {
+          push({
+            type: "thinking",
+            text: plan.thinking ?? plan.previewSaw ?? pickLoadingMessage()
+          });
+        }
+
+        if (plan?.narration || plan?.previewDrawing) {
+          push({
+            type: "say",
+            text: plan.narration ?? plan.previewDrawing ?? ""
+          });
+        }
+
+        if (plan && planHasVisualEvents(plan)) {
+          let repliedInComment = false;
+
+          for (const plannedEvent of plan.events) {
+            if (request.signal.aborted) {
+              break;
+            }
+
+            const events = plannedEventToStreamEvents(plannedEvent, turnInput);
+            for (const event of events) {
+              if (event.type === "comment_reply") {
+                repliedInComment = true;
+              }
+
+              push(event);
+              await sleep(
+                event.type === "stroke" ? 14 : event.type === "shape" ? 26 : 20
+              );
+            }
+          }
+
+          if (mode === "comment" && input.targetCommentId && !repliedInComment) {
+            push({
+              type: "comment_reply",
+              commentId: input.targetCommentId,
+              text: buildPlanSummary(plan)
+            });
+          }
+
+          push({
+            type: "done",
+            summary: buildPlanSummary(plan),
+            usage: {
+              used: quota.used,
+              limit: quota.limit
+            }
+          });
+          return;
+        }
 
         const analysis = await analyzeScene(turnInput);
         const selectedAdditions = selectAdditions(analysis, turnInput);

@@ -3,17 +3,21 @@ import {
   type CompiledObjectAction,
   type ObjectBoundingBox,
   type ObjectFamily,
+  type PlannerHumanContext,
+  type PlacementHint,
   type RenderedRecipe,
   type SceneAddition,
   type SceneAnalysis,
   type SceneSubject,
   type StrokeTiming
 } from "@/lib/draw-types";
+import { getSubjectAnchors } from "@/lib/scene-anchors";
 
 export type SketchRenderInput = {
   canvasWidth: number;
   canvasHeight: number;
   palette: string[];
+  humanDelta: PlannerHumanContext[];
 };
 
 type Bounds = {
@@ -41,6 +45,14 @@ type RecipeKey =
   | "path"
   | "hill"
   | "water"
+  | "mailbox"
+  | "lamp"
+  | "bench"
+  | "flag"
+  | "animal"
+  | "vehicle"
+  | "tool"
+  | "garden"
   | "face"
   | "structure"
   | "figure"
@@ -119,6 +131,119 @@ function bboxToBounds(bbox: ObjectBoundingBox): Bounds {
     width: bbox.width,
     height: bbox.height
   };
+}
+
+function lerp(start: number, end: number, t: number) {
+  return start + (end - start) * t;
+}
+
+function clampRatio(value: number | undefined, fallback: number) {
+  return clamp(value ?? fallback, 0, 1);
+}
+
+function getHintedSize(
+  base: Bounds,
+  defaults: { width: number; height: number },
+  addition: SceneAddition,
+  input: SketchRenderInput
+) {
+  let width = addition.scaleHint?.widthRatio
+    ? base.width * addition.scaleHint.widthRatio
+    : defaults.width;
+  let height = addition.scaleHint?.heightRatio
+    ? base.height * addition.scaleHint.heightRatio
+    : defaults.height;
+
+  if (addition.orientationHint === "horizontal" && height > width) {
+    [width, height] = [height, width];
+  }
+  if (
+    (addition.orientationHint === "vertical" || addition.orientationHint === "upright") &&
+    width > height
+  ) {
+    [width, height] = [height, width];
+  }
+
+  return {
+    width: clamp(width, 18, input.canvasWidth * 0.85),
+    height: clamp(height, 18, input.canvasHeight * 0.85)
+  };
+}
+
+function applyHintBias(
+  origin: { x: number; y: number },
+  base: Bounds,
+  hint: PlacementHint | undefined
+) {
+  const x = origin.x + (hint?.biasX ?? 0) * Math.min(base.width * 0.16, 64);
+  const y = origin.y + (hint?.biasY ?? 0) * Math.min(base.height * 0.16, 64);
+  return { x, y };
+}
+
+function makeBoxFromCenter(
+  center: { x: number; y: number },
+  size: { width: number; height: number },
+  input: SketchRenderInput
+) {
+  return fitBox(
+    {
+      x: center.x - size.width * 0.5,
+      y: center.y - size.height * 0.5,
+      width: size.width,
+      height: size.height
+    },
+    input
+  );
+}
+
+function placeBesideTarget(
+  targetBounds: Bounds,
+  targetAnchors: ReturnType<typeof getSubjectAnchors> | null,
+  size: { width: number; height: number },
+  side: "left" | "right",
+  hint: PlacementHint | undefined,
+  input: SketchRenderInput,
+  verticalMode: "ground" | "middle" = "ground"
+) {
+  const distanceFactor = clampRatio(hint?.xRatio, 0.5);
+  const gap = clamp(
+    targetBounds.width * 0.06 + size.width * (0.08 + distanceFactor * 0.18),
+    10,
+    52
+  );
+
+  const centerX =
+    side === "left"
+      ? targetBounds.minX - gap - size.width * 0.5
+      : targetBounds.maxX + gap + size.width * 0.5;
+
+  const centerY =
+    verticalMode === "ground"
+      ? (targetAnchors?.groundCenter.y ?? targetBounds.maxY) - size.height * 0.46
+      : targetBounds.minY + targetBounds.height * clampRatio(hint?.yRatio, 0.68);
+
+  const biasedOrigin = applyHintBias(
+    {
+      x: centerX - size.width * 0.5,
+      y: centerY - size.height * 0.5
+    },
+    targetBounds,
+    {
+      biasX:
+        side === "left"
+          ? Math.min(0, hint?.biasX ?? 0)
+          : Math.max(0, hint?.biasX ?? 0),
+      biasY: hint?.biasY
+    }
+  );
+
+  return boxFromOrigin(
+    biasedOrigin.x,
+    biasedOrigin.y,
+    size.width,
+    size.height,
+    input
+  );
 }
 
 function getSceneBounds(
@@ -213,6 +338,9 @@ function getRecipeKey(family: ObjectFamily): RecipeKey {
   if (includesAny(text, ["flower", "rose", "daisy", "petal", "tulip", "bloom"])) {
     return "flower";
   }
+  if (includesAny(text, ["garden", "planter", "flower patch", "bed", "window box"])) {
+    return "garden";
+  }
   if (includesAny(text, ["fence", "gate", "railing"])) {
     return "fence";
   }
@@ -224,6 +352,27 @@ function getRecipeKey(family: ObjectFamily): RecipeKey {
   }
   if (includesAny(text, ["water", "river", "lake", "pond", "ocean", "stream", "sea"])) {
     return "water";
+  }
+  if (includesAny(text, ["mailbox", "postbox"])) {
+    return "mailbox";
+  }
+  if (includesAny(text, ["lamp", "lantern", "porch light", "streetlight"])) {
+    return "lamp";
+  }
+  if (includesAny(text, ["bench", "chair", "table", "stool"])) {
+    return "bench";
+  }
+  if (includesAny(text, ["flag", "banner", "pennant"])) {
+    return "flag";
+  }
+  if (includesAny(text, ["animal", "cat", "dog", "horse", "rabbit", "birdhouse"])) {
+    return "animal";
+  }
+  if (includesAny(text, ["car", "truck", "bike", "bicycle", "wagon", "vehicle"])) {
+    return "vehicle";
+  }
+  if (includesAny(text, ["tool", "shovel", "rake", "watering can", "broom"])) {
+    return "tool";
   }
   if (includesAny(text, ["face", "head", "portrait"])) {
     return "face";
@@ -240,7 +389,13 @@ function getRecipeKey(family: ObjectFamily): RecipeKey {
 
 function familyNeedsTarget(family: ObjectFamily) {
   const key = getRecipeKey(family);
-  return key === "chimney" || key === "smoke" || key === "path";
+  return (
+    key === "chimney" ||
+    key === "smoke" ||
+    key === "path" ||
+    key === "flag" ||
+    key === "garden"
+  );
 }
 
 function preferredTargetFamilies(family: ObjectFamily): ObjectFamily[] {
@@ -250,18 +405,35 @@ function preferredTargetFamilies(family: ObjectFamily): ObjectFamily[] {
       return ["house"];
     case "smoke":
       return ["chimney", "house"];
+    case "flag":
+      return ["house", "bench"];
     case "grass":
     case "bush":
     case "flower":
+    case "garden":
     case "fence":
+    case "mailbox":
+    case "lamp":
+    case "bench":
+    case "tool":
     case "structure":
       return ["house", "tree", "hill"];
     case "tree":
     case "figure":
+    case "animal":
+    case "vehicle":
       return ["house", "hill"];
     default:
       return [];
   }
+}
+
+function matchesSubject(subject: SceneSubject, family: ObjectFamily) {
+  return (
+    includesAny(subject.family, [family]) ||
+    includesAny(subject.label, [family]) ||
+    getRecipeKey(subject.family) === getRecipeKey(family)
+  );
 }
 
 function resolveTargetSubject(
@@ -281,7 +453,7 @@ function resolveTargetSubject(
   }
 
   for (const family of preferred) {
-    const match = analysis.subjects.find((subject) => subject.family === family);
+    const match = analysis.subjects.find((subject) => matchesSubject(subject, family));
     if (match) {
       return match;
     }
@@ -302,6 +474,98 @@ function fitBox(
   };
 }
 
+function boxCenter(box: ObjectBoundingBox) {
+  return {
+    x: box.x + box.width * 0.5,
+    y: box.y + box.height * 0.5
+  };
+}
+
+function intersectArea(a: ObjectBoundingBox, b: ObjectBoundingBox) {
+  const left = Math.max(a.x, b.x);
+  const right = Math.min(a.x + a.width, b.x + b.width);
+  const top = Math.max(a.y, b.y);
+  const bottom = Math.min(a.y + a.height, b.y + b.height);
+
+  if (right <= left || bottom <= top) {
+    return 0;
+  }
+
+  return (right - left) * (bottom - top);
+}
+
+function translateBox(
+  box: ObjectBoundingBox,
+  dx: number,
+  dy: number,
+  input: SketchRenderInput
+) {
+  return fitBox(
+    {
+      x: box.x + dx,
+      y: box.y + dy,
+      width: box.width,
+      height: box.height
+    },
+    input
+  );
+}
+
+function scaleBoxFromCenter(
+  box: ObjectBoundingBox,
+  scale: number,
+  input: SketchRenderInput
+) {
+  const center = boxCenter(box);
+  return fitBox(
+    {
+      x: center.x - (box.width * scale) / 2,
+      y: center.y - (box.height * scale) / 2,
+      width: box.width * scale,
+      height: box.height * scale
+    },
+    input
+  );
+}
+
+function boxFromOrigin(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  input: SketchRenderInput
+) {
+  return fitBox({ x, y, width, height }, input);
+}
+
+function getRoofPoint(
+  relation: SceneAddition["relation"],
+  hint: PlacementHint | undefined,
+  anchors: ReturnType<typeof getSubjectAnchors>
+) {
+  if (relation === "attach_roof_left") {
+    const t = clampRatio(hint?.xRatio, 0.56);
+    return {
+      x: lerp(anchors.roofLeft.x, anchors.roofPeak.x, t),
+      y: lerp(anchors.roofLeft.y, anchors.roofPeak.y, t)
+    };
+  }
+
+  if (relation === "attach_roof_center") {
+    const offset = (hint?.biasX ?? 0) * 14;
+    return {
+      x: anchors.roofPeak.x + offset,
+      y: anchors.roofPeak.y + (hint?.biasY ?? 0) * 8
+    };
+  }
+
+  const t = clampRatio(hint?.xRatio, 0.42);
+  return {
+    x: lerp(anchors.roofPeak.x, anchors.roofRight.x, t),
+    y: lerp(anchors.roofPeak.y, anchors.roofRight.y, t)
+  };
+}
+
 function resolvePlacementBox(
   addition: SceneAddition,
   target: SceneSubject | null,
@@ -309,6 +573,7 @@ function resolvePlacementBox(
   input: SketchRenderInput
 ) {
   const targetBounds = target ? bboxToBounds(target.bbox) : null;
+  const targetAnchors = target ? getSubjectAnchors(target, input.humanDelta) : null;
   const sceneBounds = getSceneBounds(analysis, input);
   const base = targetBounds ?? sceneBounds;
   const key = getRecipeKey(addition.family);
@@ -317,196 +582,622 @@ function resolvePlacementBox(
   const small = Math.max(28, Math.min(base.width, base.height) * 0.18);
   const mediumW = Math.max(38, base.width * 0.22);
   const mediumH = Math.max(34, base.height * 0.18);
+  const hint = addition.placementHint;
+
+  const centeredBox = (
+    width: number,
+    height: number,
+    fallbackXR: number,
+    fallbackYR: number,
+    bounds: Bounds = base
+  ) => {
+    const center = {
+      x: bounds.minX + bounds.width * clampRatio(hint?.xRatio, fallbackXR),
+      y: bounds.minY + bounds.height * clampRatio(hint?.yRatio, fallbackYR)
+    };
+    const biased = applyHintBias(
+      { x: center.x - width * 0.5, y: center.y - height * 0.5 },
+      bounds,
+      hint
+    );
+    return boxFromOrigin(biased.x, biased.y, width, height, input);
+  };
 
   switch (key) {
     case "chimney": {
-      if (!targetBounds) {
+      if (!targetBounds || !targetAnchors) {
         return null;
       }
-      const width = Math.max(22, targetBounds.width * 0.14);
-      const height = Math.max(44, targetBounds.height * 0.26);
-      const relationOffset =
-        rel === "attach_roof_left" ? 0.28 : rel === "attach_roof_center" ? 0.48 : 0.68;
-      const x = targetBounds.minX + targetBounds.width * relationOffset - width * 0.5;
-      const roofBandBottom = targetBounds.minY + targetBounds.height * 0.26;
-      const y = roofBandBottom - height;
-      return fitBox({ x, y, width, height }, input);
+      const size = getHintedSize(
+        targetBounds,
+        {
+          width: Math.max(22, targetBounds.width * 0.14),
+          height: Math.max(44, targetBounds.height * 0.26)
+        },
+        addition,
+        input
+      );
+      const roofPoint = getRoofPoint(rel, hint, targetAnchors);
+      const origin = applyHintBias(
+        {
+          x: roofPoint.x - size.width * 0.44,
+          y: roofPoint.y - size.height * 0.84
+        },
+        targetBounds,
+        hint
+      );
+      return boxFromOrigin(origin.x, origin.y, size.width, size.height, input);
     }
     case "smoke": {
-      const width = Math.max(34, mediumW * 0.9);
-      const height = Math.max(46, mediumH * 1.3);
-      const x = base.minX + base.width * 0.55 - width * 0.5;
-      const y = base.minY - height * 0.9;
-      return fitBox({ x, y, width, height }, input);
+      const size = getHintedSize(
+        base,
+        {
+          width: Math.max(34, mediumW * 0.9),
+          height: Math.max(46, mediumH * 1.3)
+        },
+        addition,
+        input
+      );
+      const center = targetAnchors
+        ? {
+            x: getRoofPoint("attach_roof_right", hint, targetAnchors).x + size.width * 0.18,
+            y: targetAnchors.roofPeak.y - size.height * 0.3
+          }
+        : {
+            x: base.minX + base.width * clampRatio(hint?.xRatio, 0.6),
+            y: base.minY - size.height * 0.2
+          };
+      return makeBoxFromCenter(center, size, input);
     }
     case "cloud": {
-      const width = Math.max(68, sceneBounds.width * 0.18);
-      const height = Math.max(36, sceneBounds.height * 0.1);
-      const x =
-        rel === "sky_above_left"
-          ? sceneBounds.minX + sceneBounds.width * 0.14
-          : rel === "sky_above_right"
-            ? sceneBounds.maxX - width - sceneBounds.width * 0.1
-            : (targetBounds ?? sceneBounds).minX + (targetBounds ?? sceneBounds).width * 0.5 - width * 0.5;
-      const y = (targetBounds ?? sceneBounds).minY - height - 26;
-      return fitBox({ x, y, width, height }, input);
+      const size = getHintedSize(
+        sceneBounds,
+        {
+          width: Math.max(68, sceneBounds.width * 0.18),
+          height: Math.max(36, sceneBounds.height * 0.1)
+        },
+        addition,
+        input
+      );
+      return centeredBox(
+        size.width,
+        size.height,
+        rel === "sky_above_left" ? 0.24 : rel === "sky_above_right" ? 0.78 : 0.56,
+        0.02,
+        targetBounds ?? sceneBounds
+      );
     }
     case "sun":
     case "moon": {
-      const size = Math.max(34, sceneBounds.width * 0.11);
-      const x =
-        rel === "sky_above_left"
-          ? sceneBounds.minX + sceneBounds.width * 0.06
-          : sceneBounds.maxX - size - sceneBounds.width * 0.06;
-      const y = sceneBounds.minY - size - 34;
-      return fitBox({ x, y, width: size, height: size }, input);
+      const size = getHintedSize(
+        sceneBounds,
+        {
+          width: Math.max(34, sceneBounds.width * 0.11),
+          height: Math.max(34, sceneBounds.width * 0.11)
+        },
+        addition,
+        input
+      );
+      return centeredBox(
+        size.width,
+        size.height,
+        rel === "sky_above_left" ? 0.14 : 0.82,
+        0.02,
+        sceneBounds
+      );
     }
     case "bird": {
-      const width = Math.max(22, small);
-      const height = Math.max(14, small * 0.55);
-      const x =
-        rel === "sky_above_right"
-          ? sceneBounds.maxX - width - sceneBounds.width * 0.12
-          : rel === "sky_above_left"
-            ? sceneBounds.minX + sceneBounds.width * 0.12
-            : sceneBounds.minX + sceneBounds.width * 0.5 - width * 0.5;
-      const y = sceneBounds.minY - height - 18;
-      return fitBox({ x, y, width, height }, input);
+      const size = getHintedSize(
+        sceneBounds,
+        {
+          width: Math.max(22, small),
+          height: Math.max(14, small * 0.55)
+        },
+        addition,
+        input
+      );
+      return centeredBox(
+        size.width,
+        size.height,
+        rel === "sky_above_right" ? 0.76 : rel === "sky_above_left" ? 0.26 : 0.56,
+        0.08,
+        sceneBounds
+      );
     }
     case "grass": {
-      const width = Math.max(60, (targetBounds ?? sceneBounds).width * 0.42);
-      const height = Math.max(24, (targetBounds ?? sceneBounds).height * 0.12);
-      const x = (targetBounds ?? sceneBounds).minX + (targetBounds ?? sceneBounds).width * 0.5 - width * 0.5;
-      const y = (targetBounds ?? sceneBounds).maxY - height * 0.4;
-      return fitBox({ x, y, width, height }, input);
+      const size = getHintedSize(
+        targetBounds ?? sceneBounds,
+        {
+          width: Math.max(60, (targetBounds ?? sceneBounds).width * 0.42),
+          height: Math.max(24, (targetBounds ?? sceneBounds).height * 0.12)
+        },
+        addition,
+        input
+      );
+      return centeredBox(size.width, size.height, 0.5, 0.96, targetBounds ?? sceneBounds);
     }
     case "bush": {
-      const width = Math.max(52, mediumW);
-      const height = Math.max(34, mediumH);
-      const x =
-        rel === "beside_left"
-          ? base.minX - width * 0.8
-          : rel === "ground_left"
-            ? base.minX - width * 0.5
-            : rel === "ground_right" || rel === "beside_right"
-              ? base.maxX - width * 0.3
-              : base.minX + base.width * 0.56;
-      const y = base.maxY - height * 0.92;
-      return fitBox({ x, y, width, height }, input);
+      const size = getHintedSize(
+        base,
+        {
+          width: Math.max(52, mediumW),
+          height: Math.max(34, mediumH)
+        },
+        addition,
+        input
+      );
+      return centeredBox(
+        size.width,
+        size.height,
+        rel === "beside_left" || rel === "ground_left" ? 0.12 : rel === "ground_right" || rel === "beside_right" ? 0.84 : 0.62,
+        0.88,
+        base
+      );
     }
     case "flower": {
-      const width = Math.max(28, small * 0.8);
-      const height = Math.max(56, small * 1.6);
-      const x =
-        rel === "beside_left"
-          ? base.minX - width * 0.35
-          : rel === "beside_right"
-            ? base.maxX - width * 0.65
-            : base.minX + base.width * 0.32;
-      const y = base.maxY - height * 0.92;
-      return fitBox({ x, y, width, height }, input);
+      const size = getHintedSize(
+        base,
+        {
+          width: Math.max(28, small * 0.8),
+          height: Math.max(56, small * 1.6)
+        },
+        addition,
+        input
+      );
+      return centeredBox(
+        size.width,
+        size.height,
+        rel === "beside_left" ? 0.22 : rel === "beside_right" ? 0.8 : 0.36,
+        0.82,
+        base
+      );
     }
     case "fence": {
-      const width = Math.max(70, (targetBounds ?? sceneBounds).width * 0.48);
-      const height = Math.max(32, (targetBounds ?? sceneBounds).height * 0.16);
-      const x = (targetBounds ?? sceneBounds).minX + (targetBounds ?? sceneBounds).width * 0.5 - width * 0.5;
-      const y = (targetBounds ?? sceneBounds).maxY - height * 0.7;
-      return fitBox({ x, y, width, height }, input);
+      const size = getHintedSize(
+        targetBounds ?? sceneBounds,
+        {
+          width: Math.max(70, (targetBounds ?? sceneBounds).width * 0.48),
+          height: Math.max(32, (targetBounds ?? sceneBounds).height * 0.16)
+        },
+        addition,
+        input
+      );
+      return centeredBox(size.width, size.height, 0.5, 0.9, targetBounds ?? sceneBounds);
     }
     case "path": {
-      if (!targetBounds) {
+      if (!targetBounds || !targetAnchors) {
         return null;
       }
-      const width = Math.max(42, targetBounds.width * 0.34);
-      const height = Math.max(58, targetBounds.height * 0.45);
-      const x = targetBounds.minX + targetBounds.width * 0.5 - width * 0.5;
-      const y = targetBounds.maxY - height * 0.05;
-      return fitBox({ x, y, width, height }, input);
+      const size = getHintedSize(
+        targetBounds,
+        {
+          width: Math.max(42, targetBounds.width * 0.34),
+          height: Math.max(58, targetBounds.height * 0.45)
+        },
+        addition,
+        input
+      );
+      const doorway = targetAnchors.doorwayCenter;
+      const origin = applyHintBias(
+        {
+          x: doorway.x - size.width * 0.5,
+          y: doorway.y - size.height * 0.08
+        },
+        targetBounds,
+        hint
+      );
+      return boxFromOrigin(origin.x, origin.y, size.width, size.height, input);
     }
     case "hill": {
-      const width = Math.max(120, sceneBounds.width * 0.6);
-      const height = Math.max(40, sceneBounds.height * 0.18);
-      const x = sceneBounds.minX + sceneBounds.width * 0.5 - width * 0.5;
-      const y = sceneBounds.maxY - height * 0.2;
-      return fitBox({ x, y, width, height }, input);
+      const size = getHintedSize(
+        sceneBounds,
+        {
+          width: Math.max(120, sceneBounds.width * 0.6),
+          height: Math.max(40, sceneBounds.height * 0.18)
+        },
+        addition,
+        input
+      );
+      return centeredBox(size.width, size.height, 0.5, 0.94, sceneBounds);
     }
     case "water": {
-      const width = Math.max(84, sceneBounds.width * 0.32);
-      const height = Math.max(26, sceneBounds.height * 0.1);
-      const x =
-        rel === "ground_left"
-          ? sceneBounds.minX + sceneBounds.width * 0.08
-          : rel === "ground_right"
-            ? sceneBounds.maxX - width - sceneBounds.width * 0.08
-            : sceneBounds.minX + sceneBounds.width * 0.5 - width * 0.5;
-      const y = sceneBounds.maxY - height * 0.2;
-      return fitBox({ x, y, width, height }, input);
+      const size = getHintedSize(
+        sceneBounds,
+        {
+          width: Math.max(84, sceneBounds.width * 0.32),
+          height: Math.max(26, sceneBounds.height * 0.1)
+        },
+        addition,
+        input
+      );
+      return centeredBox(
+        size.width,
+        size.height,
+        rel === "ground_left" ? 0.24 : rel === "ground_right" ? 0.76 : 0.5,
+        0.94,
+        sceneBounds
+      );
     }
     case "tree": {
-      const width = Math.max(58, sceneBounds.width * 0.16);
-      const height = Math.max(120, sceneBounds.height * 0.42);
-      const x =
-        rel === "beside_left"
-          ? base.minX - width * 0.72
-          : base.maxX - width * 0.28;
-      const y = base.maxY - height * 0.92;
-      return fitBox({ x, y, width, height }, input);
+      const size = getHintedSize(
+        sceneBounds,
+        {
+          width: Math.max(58, sceneBounds.width * 0.16),
+          height: Math.max(120, sceneBounds.height * 0.42)
+        },
+        addition,
+        input
+      );
+      if (targetBounds && targetAnchors && (rel === "beside_left" || rel === "beside_right")) {
+        return placeBesideTarget(
+          targetBounds,
+          targetAnchors,
+          size,
+          rel === "beside_left" ? "left" : "right",
+          hint,
+          input,
+          "ground"
+        );
+      }
+      return centeredBox(
+        size.width,
+        size.height,
+        rel === "beside_left" ? 0.18 : 0.82,
+        0.74,
+        base
+      );
     }
     case "house": {
-      const width = Math.max(84, sceneBounds.width * 0.24);
-      const height = Math.max(92, sceneBounds.height * 0.28);
-      const x =
-        rel === "beside_left"
-          ? base.minX - width * 0.82
-          : base.maxX - width * 0.18;
-      const y = base.maxY - height * 0.96;
-      return fitBox({ x, y, width, height }, input);
+      const size = getHintedSize(
+        sceneBounds,
+        {
+          width: Math.max(84, sceneBounds.width * 0.24),
+          height: Math.max(92, sceneBounds.height * 0.28)
+        },
+        addition,
+        input
+      );
+      return centeredBox(
+        size.width,
+        size.height,
+        rel === "beside_left" ? 0.18 : 0.82,
+        0.76,
+        base
+      );
+    }
+    case "mailbox": {
+      const size = getHintedSize(
+        base,
+        { width: Math.max(28, mediumW * 0.54), height: Math.max(58, mediumH * 1.55) },
+        addition,
+        input
+      );
+      if (targetBounds && targetAnchors && (rel === "beside_left" || rel === "beside_right")) {
+        return placeBesideTarget(
+          targetBounds,
+          targetAnchors,
+          size,
+          rel === "beside_left" ? "left" : "right",
+          hint,
+          input,
+          "ground"
+        );
+      }
+      return centeredBox(
+        size.width,
+        size.height,
+        rel === "beside_left" ? 0.22 : 0.78,
+        0.82,
+        base
+      );
+    }
+    case "lamp": {
+      const size = getHintedSize(
+        base,
+        { width: Math.max(24, mediumW * 0.48), height: Math.max(76, mediumH * 1.95) },
+        addition,
+        input
+      );
+      if (targetBounds && targetAnchors && (rel === "beside_left" || rel === "beside_right")) {
+        return placeBesideTarget(
+          targetBounds,
+          targetAnchors,
+          size,
+          rel === "beside_left" ? "left" : "right",
+          hint,
+          input,
+          "ground"
+        );
+      }
+      return centeredBox(
+        size.width,
+        size.height,
+        rel === "beside_left" ? 0.2 : 0.8,
+        0.78,
+        base
+      );
+    }
+    case "bench": {
+      const size = getHintedSize(
+        base,
+        { width: Math.max(52, mediumW), height: Math.max(42, mediumH) },
+        addition,
+        input
+      );
+      if (targetBounds && targetAnchors && (rel === "beside_left" || rel === "beside_right")) {
+        return placeBesideTarget(
+          targetBounds,
+          targetAnchors,
+          size,
+          rel === "beside_left" ? "left" : "right",
+          hint,
+          input,
+          "ground"
+        );
+      }
+      return centeredBox(
+        size.width,
+        size.height,
+        rel === "beside_left" ? 0.22 : rel === "beside_right" ? 0.78 : 0.5,
+        0.9,
+        base
+      );
+    }
+    case "flag": {
+      const size = getHintedSize(
+        base,
+        { width: Math.max(30, mediumW * 0.6), height: Math.max(86, mediumH * 2.1) },
+        addition,
+        input
+      );
+      if (targetAnchors && rel.startsWith("attach_roof")) {
+        const roofPoint = getRoofPoint(rel, hint, targetAnchors);
+        const origin = applyHintBias(
+          {
+            x: roofPoint.x - size.width * 0.22,
+            y: roofPoint.y - size.height * 0.9
+          },
+          targetBounds ?? base,
+          hint
+        );
+        return boxFromOrigin(origin.x, origin.y, size.width, size.height, input);
+      }
+      return centeredBox(size.width, size.height, 0.82, 0.66, base);
+    }
+    case "animal": {
+      const size = getHintedSize(
+        base,
+        { width: Math.max(52, mediumW), height: Math.max(46, mediumH * 1.2) },
+        addition,
+        input
+      );
+      if (targetBounds && targetAnchors && (rel === "beside_left" || rel === "beside_right")) {
+        return placeBesideTarget(
+          targetBounds,
+          targetAnchors,
+          size,
+          rel === "beside_left" ? "left" : "right",
+          hint,
+          input,
+          "ground"
+        );
+      }
+      return centeredBox(
+        size.width,
+        size.height,
+        rel === "beside_left" ? 0.24 : rel === "beside_right" ? 0.76 : 0.56,
+        0.9,
+        base
+      );
+    }
+    case "vehicle": {
+      const size = getHintedSize(
+        base,
+        { width: Math.max(68, mediumW * 1.1), height: Math.max(34, mediumH * 0.9) },
+        addition,
+        input
+      );
+      return centeredBox(
+        size.width,
+        size.height,
+        rel === "ground_left" ? 0.24 : rel === "ground_right" ? 0.76 : 0.56,
+        0.92,
+        base
+      );
+    }
+    case "tool": {
+      const size = getHintedSize(
+        base,
+        { width: Math.max(26, mediumW * 0.48), height: Math.max(72, mediumH * 1.8) },
+        addition,
+        input
+      );
+      return centeredBox(
+        size.width,
+        size.height,
+        rel === "beside_left" ? 0.2 : 0.8,
+        0.82,
+        base
+      );
+    }
+    case "garden": {
+      const size = getHintedSize(
+        base,
+        { width: Math.max(66, mediumW * 1.1), height: Math.max(42, mediumH * 1.05) },
+        addition,
+        input
+      );
+      return centeredBox(
+        size.width,
+        size.height,
+        rel === "ground_left" ? 0.26 : rel === "ground_right" ? 0.74 : 0.5,
+        0.9,
+        base
+      );
     }
     case "structure": {
-      const width = Math.max(28, mediumW * 0.75);
-      const height = Math.max(52, mediumH * 1.55);
-      const x =
-        rel === "beside_left"
-          ? base.minX - width * 0.72
-          : rel === "sky_above"
-            ? base.minX + base.width * 0.5 - width * 0.5
-            : base.maxX - width * 0.28;
-      const y =
-        rel === "sky_above" ? base.minY - height - 18 : base.maxY - height * 0.94;
-      return fitBox({ x, y, width, height }, input);
+      const size = getHintedSize(
+        base,
+        { width: Math.max(28, mediumW * 0.75), height: Math.max(52, mediumH * 1.55) },
+        addition,
+        input
+      );
+      if (targetBounds && targetAnchors && (rel === "beside_left" || rel === "beside_right")) {
+        return placeBesideTarget(
+          targetBounds,
+          targetAnchors,
+          size,
+          rel === "beside_left" ? "left" : "right",
+          hint,
+          input,
+          "middle"
+        );
+      }
+      return centeredBox(
+        size.width,
+        size.height,
+        rel === "beside_left" ? 0.2 : rel === "sky_above" ? 0.5 : 0.8,
+        rel === "sky_above" ? 0.04 : 0.82,
+        base
+      );
     }
     case "figure": {
-      const width = Math.max(34, small);
-      const height = Math.max(72, mediumH * 1.9);
-      const x =
-        rel === "beside_left"
-          ? base.minX - width * 0.62
-          : base.maxX - width * 0.38;
-      const y = base.maxY - height * 0.96;
-      return fitBox({ x, y, width, height }, input);
+      const size = getHintedSize(
+        base,
+        { width: Math.max(34, small), height: Math.max(72, mediumH * 1.9) },
+        addition,
+        input
+      );
+      if (targetBounds && targetAnchors && (rel === "beside_left" || rel === "beside_right")) {
+        return placeBesideTarget(
+          targetBounds,
+          targetAnchors,
+          size,
+          rel === "beside_left" ? "left" : "right",
+          hint,
+          input,
+          "ground"
+        );
+      }
+      return centeredBox(
+        size.width,
+        size.height,
+        rel === "beside_left" ? 0.24 : 0.76,
+        0.8,
+        base
+      );
     }
     case "loop": {
-      const width = Math.max(40, mediumW * 0.95);
-      const height = Math.max(34, mediumH * 0.95);
-      const x =
-        rel === "sky_above"
-          ? base.minX + base.width * 0.5 - width * 0.5
-          : rel === "beside_left"
-            ? base.minX - width * 0.58
-            : rel === "beside_right"
-              ? base.maxX - width * 0.42
-              : base.minX + base.width * 0.52 - width * 0.5;
-      const y =
-        rel === "sky_above"
-          ? base.minY - height - 18
-          : rel === "ground_front"
-            ? base.maxY - height * 0.9
-            : base.minY + base.height * 0.46;
-      return fitBox({ x, y, width, height }, input);
+      const size = getHintedSize(
+        base,
+        { width: Math.max(40, mediumW * 0.95), height: Math.max(34, mediumH * 0.95) },
+        addition,
+        input
+      );
+      if (targetBounds && targetAnchors && (rel === "beside_left" || rel === "beside_right")) {
+        return placeBesideTarget(
+          targetBounds,
+          targetAnchors,
+          size,
+          rel === "beside_left" ? "left" : "right",
+          hint,
+          input,
+          "middle"
+        );
+      }
+      return centeredBox(
+        size.width,
+        size.height,
+        rel === "sky_above" ? 0.5 : rel === "beside_left" ? 0.22 : rel === "beside_right" ? 0.78 : 0.56,
+        rel === "sky_above" ? 0.08 : rel === "ground_front" ? 0.88 : 0.5,
+        base
+      );
     }
     default:
       return null;
   }
+}
+
+function adjustPlacementForCollisions(
+  box: ObjectBoundingBox,
+  addition: SceneAddition,
+  target: SceneSubject | null,
+  analysis: SceneAnalysis,
+  input: SketchRenderInput
+) {
+  let adjusted = box;
+  const attached = addition.relation.startsWith("attach_roof");
+  const targetId = target?.id ?? null;
+
+  for (let pass = 0; pass < 4; pass += 1) {
+    let changed = false;
+
+    for (const subject of analysis.subjects) {
+      if (subject.id === targetId) {
+        continue;
+      }
+
+      const overlap = intersectArea(adjusted, subject.bbox);
+      const adjustedArea = adjusted.width * adjusted.height;
+      if (overlap <= adjustedArea * 0.12) {
+        continue;
+      }
+
+      changed = true;
+      const subjectCenter = boxCenter(subject.bbox);
+      const adjustedCenter = boxCenter(adjusted);
+      const moveLeft = adjustedCenter.x < subjectCenter.x;
+      const dx = moveLeft
+        ? -(overlap / Math.max(1, adjusted.height)) - 18
+        : overlap / Math.max(1, adjusted.height) + 18;
+      const dy =
+        addition.relation.startsWith("sky_")
+          ? -12
+          : addition.relation.startsWith("ground_") || addition.relation === "ground_front"
+            ? 10
+            : 0;
+      adjusted = translateBox(adjusted, dx, dy, input);
+    }
+
+    if (target && !attached) {
+      const overlap = intersectArea(adjusted, target.bbox);
+      const adjustedArea = adjusted.width * adjusted.height;
+      if (overlap > 0 && (addition.relation === "beside_left" || addition.relation === "beside_right")) {
+        changed = true;
+        const gap = clamp(target.bbox.width * 0.05, 10, 28);
+        adjusted =
+          addition.relation === "beside_left"
+            ? fitBox(
+                {
+                  x: target.bbox.x - adjusted.width - gap,
+                  y: adjusted.y,
+                  width: adjusted.width,
+                  height: adjusted.height
+                },
+                input
+              )
+            : fitBox(
+                {
+                  x: target.bbox.x + target.bbox.width + gap,
+                  y: adjusted.y,
+                  width: adjusted.width,
+                  height: adjusted.height
+                },
+                input
+              );
+      }
+      if (overlap > adjustedArea * 0.28) {
+        changed = true;
+        adjusted = scaleBoxFromCenter(adjusted, 0.88, input);
+      }
+    }
+
+    if (!changed) {
+      break;
+    }
+  }
+
+  return adjusted;
 }
 
 function getStrokeColors(family: ObjectFamily, palette: string[]) {
@@ -522,10 +1213,12 @@ function getStrokeColors(family: ObjectFamily, palette: string[]) {
     case "water":
       return { primary: cool, secondary: ink };
     case "flower":
+    case "flag":
       return { primary: ink, secondary: warm };
     case "grass":
     case "bush":
     case "tree":
+    case "garden":
       return { primary: organic, secondary: ink };
     default:
       return { primary: ink, secondary: ink };
@@ -1077,6 +1770,359 @@ function renderHouse(
   ];
 }
 
+function renderMailbox(
+  bbox: ObjectBoundingBox,
+  colors: { primary: string; secondary: string },
+  rng: () => number,
+  input: SketchRenderInput
+) {
+  const postX = bbox.x + bbox.width * 0.46;
+  const boxLeft = bbox.x + bbox.width * 0.18;
+  const boxRight = bbox.x + bbox.width * 0.82;
+  const boxTop = bbox.y + bbox.height * 0.16;
+  const boxBottom = bbox.y + bbox.height * 0.48;
+
+  return [
+    action(input, {
+      tool: "brush",
+      color: colors.primary,
+      width: 3,
+      opacity: 0.88,
+      points: [
+        [postX, bbox.y + bbox.height],
+        [postX + jitter(rng, 2), boxBottom]
+      ],
+      timing: { speed: 1, pauseAfterMs: 40 }
+    }),
+    action(input, {
+      tool: "brush",
+      color: colors.primary,
+      width: 3.2,
+      opacity: 0.9,
+      points: [
+        [boxLeft, boxBottom],
+        [boxLeft, boxTop],
+        [boxRight, boxTop],
+        [boxRight, boxBottom]
+      ],
+      timing: { speed: 1.02, pauseAfterMs: 70 }
+    }),
+    action(input, {
+      tool: "brush",
+      color: colors.secondary,
+      width: 2.6,
+      opacity: 0.72,
+      points: [
+        [boxLeft, boxTop + (boxBottom - boxTop) * 0.42],
+        [boxRight, boxTop + (boxBottom - boxTop) * 0.42]
+      ],
+      timing: { speed: 1.02, pauseAfterMs: 90 }
+    })
+  ];
+}
+
+function renderLamp(
+  bbox: ObjectBoundingBox,
+  colors: { primary: string; secondary: string },
+  rng: () => number,
+  input: SketchRenderInput
+) {
+  const poleX = bbox.x + bbox.width * 0.46;
+  const topY = bbox.y + bbox.height * 0.1;
+  const armY = bbox.y + bbox.height * 0.22;
+
+  return [
+    action(input, {
+      tool: "brush",
+      color: colors.primary,
+      width: 3.2,
+      opacity: 0.88,
+      points: [
+        [poleX, bbox.y + bbox.height],
+        [poleX + jitter(rng, 2), topY]
+      ],
+      timing: { speed: 1.02, pauseAfterMs: 35 }
+    }),
+    action(input, {
+      tool: "brush",
+      color: colors.primary,
+      width: 2.8,
+      opacity: 0.86,
+      points: [
+        [poleX, armY],
+        [bbox.x + bbox.width * 0.76, armY],
+        [bbox.x + bbox.width * 0.7, bbox.y + bbox.height * 0.32]
+      ],
+      timing: { speed: 1.04, pauseAfterMs: 50 }
+    }),
+    action(input, {
+      tool: "brush",
+      color: colors.secondary,
+      width: 2.6,
+      opacity: 0.7,
+      points: [
+        [bbox.x + bbox.width * 0.64, bbox.y + bbox.height * 0.34],
+        [bbox.x + bbox.width * 0.76, bbox.y + bbox.height * 0.44],
+        [bbox.x + bbox.width * 0.68, bbox.y + bbox.height * 0.52]
+      ],
+      timing: { speed: 1.04, pauseAfterMs: 90 }
+    })
+  ];
+}
+
+function renderBench(
+  bbox: ObjectBoundingBox,
+  colors: { primary: string; secondary: string },
+  rng: () => number,
+  input: SketchRenderInput
+) {
+  const seatY = bbox.y + bbox.height * 0.58;
+  const backY = bbox.y + bbox.height * 0.34;
+  const left = bbox.x + bbox.width * 0.12;
+  const right = bbox.x + bbox.width * 0.88;
+  return [
+    action(input, {
+      tool: "brush",
+      color: colors.primary,
+      width: 3.1,
+      opacity: 0.9,
+      points: [
+        [left, seatY],
+        [right, seatY]
+      ],
+      timing: { speed: 1.02, pauseAfterMs: 20 }
+    }),
+    action(input, {
+      tool: "brush",
+      color: colors.primary,
+      width: 3.1,
+      opacity: 0.84,
+      points: [
+        [left + bbox.width * 0.06, backY],
+        [left + bbox.width * 0.08, seatY],
+        [right - bbox.width * 0.1, backY + jitter(rng, 3)]
+      ],
+      timing: { speed: 1.02, pauseAfterMs: 42 }
+    }),
+    action(input, {
+      tool: "brush",
+      color: colors.secondary,
+      width: 2.8,
+      opacity: 0.76,
+      points: [
+        [left + bbox.width * 0.18, seatY],
+        [left + bbox.width * 0.14, bbox.y + bbox.height],
+        [right - bbox.width * 0.18, seatY],
+        [right - bbox.width * 0.14, bbox.y + bbox.height]
+      ],
+      timing: { speed: 1.04, pauseAfterMs: 90 }
+    })
+  ];
+}
+
+function renderFlag(
+  bbox: ObjectBoundingBox,
+  colors: { primary: string; secondary: string },
+  rng: () => number,
+  input: SketchRenderInput
+) {
+  const poleX = bbox.x + bbox.width * 0.2;
+  const topY = bbox.y + bbox.height * 0.08;
+  const flagY = bbox.y + bbox.height * 0.18;
+
+  return [
+    action(input, {
+      tool: "brush",
+      color: colors.primary,
+      width: 3,
+      opacity: 0.9,
+      points: [
+        [poleX, bbox.y + bbox.height],
+        [poleX, topY]
+      ],
+      timing: { speed: 1, pauseAfterMs: 26 }
+    }),
+    action(input, {
+      tool: "brush",
+      color: colors.secondary,
+      width: 3.1,
+      opacity: 0.86,
+      points: [
+        [poleX, flagY],
+        [bbox.x + bbox.width * 0.74, flagY + bbox.height * 0.06],
+        [bbox.x + bbox.width * 0.62, flagY + bbox.height * 0.24],
+        [poleX, flagY + bbox.height * 0.18]
+      ],
+      timing: { speed: 1.04, pauseAfterMs: 90 }
+    })
+  ];
+}
+
+function renderAnimal(
+  bbox: ObjectBoundingBox,
+  colors: { primary: string; secondary: string },
+  rng: () => number,
+  input: SketchRenderInput
+) {
+  const midY = bbox.y + bbox.height * 0.56;
+  return [
+    action(input, {
+      tool: "brush",
+      color: colors.primary,
+      width: 3.1,
+      opacity: 0.88,
+      points: [
+        [bbox.x + bbox.width * 0.12, midY],
+        [bbox.x + bbox.width * 0.22, bbox.y + bbox.height * 0.3 + jitter(rng, 4)],
+        [bbox.x + bbox.width * 0.52, bbox.y + bbox.height * 0.24],
+        [bbox.x + bbox.width * 0.78, bbox.y + bbox.height * 0.36],
+        [bbox.x + bbox.width * 0.88, midY]
+      ],
+      timing: { speed: 1.04, pauseAfterMs: 35 }
+    }),
+    action(input, {
+      tool: "brush",
+      color: colors.primary,
+      width: 2.8,
+      opacity: 0.82,
+      points: [
+        [bbox.x + bbox.width * 0.7, midY],
+        [bbox.x + bbox.width * 0.88, bbox.y + bbox.height * 0.4],
+        [bbox.x + bbox.width * 0.82, bbox.y + bbox.height * 0.24]
+      ],
+      timing: { speed: 1.05, pauseAfterMs: 45 }
+    }),
+    action(input, {
+      tool: "brush",
+      color: colors.secondary,
+      width: 2.6,
+      opacity: 0.76,
+      points: [
+        [bbox.x + bbox.width * 0.22, midY],
+        [bbox.x + bbox.width * 0.18, bbox.y + bbox.height],
+        [bbox.x + bbox.width * 0.46, midY],
+        [bbox.x + bbox.width * 0.44, bbox.y + bbox.height],
+        [bbox.x + bbox.width * 0.66, midY],
+        [bbox.x + bbox.width * 0.64, bbox.y + bbox.height]
+      ],
+      timing: { speed: 1.05, pauseAfterMs: 90 }
+    })
+  ];
+}
+
+function renderVehicle(
+  bbox: ObjectBoundingBox,
+  colors: { primary: string; secondary: string },
+  rng: () => number,
+  input: SketchRenderInput
+) {
+  const baseY = bbox.y + bbox.height * 0.76;
+  return [
+    action(input, {
+      tool: "brush",
+      color: colors.primary,
+      width: 3.2,
+      opacity: 0.9,
+      points: [
+        [bbox.x + bbox.width * 0.08, baseY],
+        [bbox.x + bbox.width * 0.22, bbox.y + bbox.height * 0.44],
+        [bbox.x + bbox.width * 0.66, bbox.y + bbox.height * 0.42],
+        [bbox.x + bbox.width * 0.84, baseY],
+        [bbox.x + bbox.width * 0.92, baseY]
+      ],
+      timing: { speed: 1.02, pauseAfterMs: 34 }
+    }),
+    action(input, {
+      tool: "brush",
+      color: colors.secondary,
+      width: 2.8,
+      opacity: 0.8,
+      points: [
+        [bbox.x + bbox.width * 0.18, baseY],
+        [bbox.x + bbox.width * 0.28, bbox.y + bbox.height * 0.9],
+        [bbox.x + bbox.width * 0.38, baseY]
+      ],
+      timing: { speed: 1.02, pauseAfterMs: 18 }
+    }),
+    action(input, {
+      tool: "brush",
+      color: colors.secondary,
+      width: 2.8,
+      opacity: 0.8,
+      points: [
+        [bbox.x + bbox.width * 0.62, baseY],
+        [bbox.x + bbox.width * 0.72, bbox.y + bbox.height * 0.9],
+        [bbox.x + bbox.width * 0.82, baseY]
+      ],
+      timing: { speed: 1.02, pauseAfterMs: 90 }
+    })
+  ];
+}
+
+function renderTool(
+  bbox: ObjectBoundingBox,
+  colors: { primary: string; secondary: string },
+  rng: () => number,
+  input: SketchRenderInput
+) {
+  const handleStart = [bbox.x + bbox.width * 0.22, bbox.y + bbox.height] as [number, number];
+  const handleEnd = [bbox.x + bbox.width * 0.68, bbox.y + bbox.height * 0.18] as [number, number];
+  return [
+    action(input, {
+      tool: "brush",
+      color: colors.primary,
+      width: 3,
+      opacity: 0.88,
+      points: [handleStart, handleEnd],
+      timing: { speed: 1.02, pauseAfterMs: 28 }
+    }),
+    action(input, {
+      tool: "brush",
+      color: colors.secondary,
+      width: 2.8,
+      opacity: 0.8,
+      points: [
+        [handleEnd[0] - bbox.width * 0.12, handleEnd[1] + bbox.height * 0.04],
+        [handleEnd[0] + bbox.width * 0.08, handleEnd[1] - bbox.height * 0.08],
+        [handleEnd[0] + bbox.width * 0.16, handleEnd[1] + bbox.height * 0.12]
+      ],
+      timing: { speed: 1.02, pauseAfterMs: 90 }
+    })
+  ];
+}
+
+function renderGarden(
+  bbox: ObjectBoundingBox,
+  colors: { primary: string; secondary: string },
+  rng: () => number,
+  input: SketchRenderInput
+) {
+  return [
+    ...renderBush(
+      {
+        x: bbox.x + bbox.width * 0.02,
+        y: bbox.y + bbox.height * 0.12,
+        width: bbox.width * 0.54,
+        height: bbox.height * 0.84
+      },
+      colors,
+      rng,
+      input
+    ),
+    ...renderFlower(
+      {
+        x: bbox.x + bbox.width * 0.48,
+        y: bbox.y + bbox.height * 0.02,
+        width: bbox.width * 0.46,
+        height: bbox.height * 0.98
+      },
+      colors,
+      rng,
+      input
+    )
+  ];
+}
+
 function renderGenericStructure(
   bbox: ObjectBoundingBox,
   colors: { primary: string; secondary: string },
@@ -1218,13 +2264,13 @@ function renderGenericLoop(
 }
 
 function renderByFamily(
-  family: ObjectFamily,
+  addition: SceneAddition,
   bbox: ObjectBoundingBox,
   colors: { primary: string; secondary: string },
   rng: () => number,
   input: SketchRenderInput
 ) {
-  switch (getRecipeKey(family)) {
+  switch (getRecipeKey(addition.family)) {
     case "chimney":
       return renderChimney(bbox, colors, rng, input);
     case "smoke":
@@ -1255,6 +2301,22 @@ function renderByFamily(
       return renderTree(bbox, colors, rng, input);
     case "house":
       return renderHouse(bbox, colors, rng, input);
+    case "mailbox":
+      return renderMailbox(bbox, colors, rng, input);
+    case "lamp":
+      return renderLamp(bbox, colors, rng, input);
+    case "bench":
+      return renderBench(bbox, colors, rng, input);
+    case "flag":
+      return renderFlag(bbox, colors, rng, input);
+    case "animal":
+      return renderAnimal(bbox, colors, rng, input);
+    case "vehicle":
+      return renderVehicle(bbox, colors, rng, input);
+    case "tool":
+      return renderTool(bbox, colors, rng, input);
+    case "garden":
+      return renderGarden(bbox, colors, rng, input);
     case "face":
       return renderGenericFigure(bbox, colors, rng, input);
     case "structure":
@@ -1306,10 +2368,17 @@ export function renderSceneAddition(
   if (!bbox) {
     return null;
   }
+  const adjustedBbox = adjustPlacementForCollisions(
+    bbox,
+    addition,
+    targetSubject,
+    analysis,
+    input
+  );
 
   const colors = getStrokeColors(addition.family, input.palette);
   const rng = createRng(`${addition.id}:${addition.family}:${analysis.scene}`);
-  const actions = renderByFamily(addition.family, bbox, colors, rng, input);
+  const actions = renderByFamily(addition, adjustedBbox, colors, rng, input);
 
   if (actions.length === 0) {
     return null;

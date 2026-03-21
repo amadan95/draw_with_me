@@ -14,8 +14,8 @@ import {
   getPalette,
 } from "@/lib/draw-types";
 import {
+  getCanvasHumanContext,
   getRecentAiContext,
-  getRecentHumanContext,
   parseNdjsonStream
 } from "@/lib/draw-utils";
 
@@ -51,7 +51,6 @@ export function DrawApp() {
     aiSummary,
     activeCommentId,
     commentComposer,
-    lastAiElementIndex,
     usage,
     setTool,
     setStrokeSize,
@@ -279,7 +278,7 @@ export function DrawApp() {
             canvasWidth: metrics.width,
             canvasHeight: metrics.height,
             palette,
-            humanDelta: getRecentHumanContext(elements, lastAiElementIndex, 6),
+            humanDelta: getCanvasHumanContext(elements, 24),
             aiDelta: getRecentAiContext(elements, 4),
             comments,
             turnHistory: turnHistory.slice(-8),

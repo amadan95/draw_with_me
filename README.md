@@ -1,6 +1,6 @@
 # Draw With Me
 
-`Draw With Me` is a standalone Next.js drawing app where a human sketches on a canvas and Mistral responds as a drawing collaborator.
+`Draw With Me` is a standalone Next.js drawing app where a human sketches on a canvas and Gemini responds as a drawing collaborator.
 
 The AI does not generate a bitmap image. It reads the scene semantically and the app renders the chosen additions locally as animated sketch strokes.
 
@@ -12,7 +12,7 @@ The AI does not generate a bitmap image. It reads the scene semantically and the
 - Live stroke animation for AI output instead of instant stamping
 - Minimal floating UI inspired by collaborative drawing tools
 - Local draft persistence with Zustand
-- Server-side Mistral scene analysis with local sketch rendering
+- Server-side Gemini scene analysis with local sketch rendering
 
 ## Tech Stack
 
@@ -28,7 +28,7 @@ The AI does not generate a bitmap image. It reads the scene semantically and the
 
 ## AI Architecture
 
-The current AI system treats Mistral as a scene analyst, not a painter.
+The current AI system treats Gemini as a scene analyst, not a painter.
 
 ### Request flow
 
@@ -44,7 +44,7 @@ When the user sends a turn, the client sends:
 
 ### Scene analysis response
 
-Mistral is asked to return strict JSON only. The expected shape is:
+Gemini is asked to return strict JSON only. The expected shape is:
 
 ```json
 {
@@ -131,8 +131,8 @@ cp .env.example .env.local
 Current env vars:
 
 ```bash
-MISTRAL_API_KEY=
-MISTRAL_MODEL=mistral-small-latest
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-2.5-flash-lite
 
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
 CLERK_SECRET_KEY=
@@ -171,7 +171,7 @@ npm run typecheck
 
 ## Current Notes
 
-- Mistral calls stay server-side.
+- Gemini calls stay server-side.
 - The AI is optimized for structured drawing actions, not image generation.
 - The app prefers restrained collaboration, but the prompt currently encourages scene-aware additions when the drawing is sparse.
 - Upstash Redis is optional in local use. If it is not configured, quota handling falls back in memory.

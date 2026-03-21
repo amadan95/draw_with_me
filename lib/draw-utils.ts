@@ -287,6 +287,7 @@ function drawStrokePath(
 }
 
 function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeElement) {
+  const shouldFill = Boolean(shape.fill && shape.fill !== "transparent");
   ctx.save();
   ctx.translate(shape.x, shape.y);
   ctx.rotate(shape.rotation ?? 0);
@@ -298,7 +299,7 @@ function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeElement) {
 
   switch (shape.shape) {
     case "rect":
-      if (shape.fill) {
+      if (shouldFill) {
         ctx.fillRect(-shape.width / 2, -shape.height / 2, shape.width, shape.height);
       }
       ctx.strokeRect(-shape.width / 2, -shape.height / 2, shape.width, shape.height);
@@ -306,11 +307,36 @@ function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeElement) {
     case "circle":
       ctx.beginPath();
       ctx.ellipse(0, 0, shape.width / 2, shape.height / 2, 0, 0, Math.PI * 2);
-      if (shape.fill) {
+      if (shouldFill) {
         ctx.fill();
       }
       ctx.stroke();
       break;
+    case "triangle":
+      ctx.beginPath();
+      ctx.moveTo(0, -shape.height / 2);
+      ctx.lineTo(shape.width / 2, shape.height / 2);
+      ctx.lineTo(-shape.width / 2, shape.height / 2);
+      ctx.closePath();
+      if (shouldFill) {
+        ctx.fill();
+      }
+      ctx.stroke();
+      break;
+    case "trapezoid": {
+      const topWidth = shape.width * 0.58;
+      ctx.beginPath();
+      ctx.moveTo(-topWidth / 2, -shape.height / 2);
+      ctx.lineTo(topWidth / 2, -shape.height / 2);
+      ctx.lineTo(shape.width / 2, shape.height / 2);
+      ctx.lineTo(-shape.width / 2, shape.height / 2);
+      ctx.closePath();
+      if (shouldFill) {
+        ctx.fill();
+      }
+      ctx.stroke();
+      break;
+    }
     case "line":
       ctx.beginPath();
       ctx.moveTo(-shape.width / 2, -shape.height / 2);
@@ -465,6 +491,13 @@ export function elementsToSvg(
           if (element.shape === "rect") {
             return `<rect x="${element.x - element.width / 2}" y="${element.y - element.height / 2}" width="${element.width}" height="${element.height}" fill="${element.fill ?? "transparent"}" stroke="${element.color}" stroke-width="${element.strokeWidth ?? 2}" />`;
           }
+          if (element.shape === "triangle") {
+            return `<polygon points="${element.x},${element.y - element.height / 2} ${element.x + element.width / 2},${element.y + element.height / 2} ${element.x - element.width / 2},${element.y + element.height / 2}" fill="${element.fill ?? "transparent"}" stroke="${element.color}" stroke-width="${element.strokeWidth ?? 2}" stroke-linejoin="round" />`;
+          }
+          if (element.shape === "trapezoid") {
+            const topWidth = element.width * 0.58;
+            return `<polygon points="${element.x - topWidth / 2},${element.y - element.height / 2} ${element.x + topWidth / 2},${element.y - element.height / 2} ${element.x + element.width / 2},${element.y + element.height / 2} ${element.x - element.width / 2},${element.y + element.height / 2}" fill="${element.fill ?? "transparent"}" stroke="${element.color}" stroke-width="${element.strokeWidth ?? 2}" stroke-linejoin="round" />`;
+          }
           if (element.shape === "line") {
             return `<line x1="${element.x - element.width / 2}" y1="${element.y - element.height / 2}" x2="${element.x + element.width / 2}" y2="${element.y + element.height / 2}" stroke="${element.color}" stroke-width="${element.strokeWidth ?? 2}" stroke-linecap="round" />`;
           }
@@ -505,6 +538,56 @@ export function getRecentHumanContext(
   maxElements = 6
 ) {
   return getHumanDelta(elements, lastAiElementIndex)
+    .slice(-maxElements)
+    .map((element) => {
+      if (element.kind === "humanStroke") {
+        return {
+          kind: element.kind,
+          tool: element.tool,
+          color: element.color,
+          size: element.size,
+          points: element.points
+            .filter((_, index) => index % Math.max(1, Math.ceil(element.points.length / 24)) === 0)
+            .slice(0, 24)
+            .map((point) => [Math.round(point.x), Math.round(point.y)] as [number, number])
+        };
+      }
+
+      if (element.kind === "asciiBlock") {
+        return {
+          kind: element.kind,
+          color: element.color,
+          fontSize: element.fontSize,
+          x: Math.round(element.x),
+          y: Math.round(element.y),
+          text: element.text.slice(0, 80)
+        };
+      }
+
+      return {
+        kind: element.kind,
+        shape: element.shape,
+        color: element.color,
+        x: Math.round(element.x),
+        y: Math.round(element.y),
+        width: Math.round(element.width),
+        height: Math.round(element.height),
+        strokeWidth: element.strokeWidth ?? 2
+      };
+    });
+}
+
+export function getCanvasHumanContext(
+  elements: DrawingElement[],
+  maxElements = 24
+) {
+  return elements
+    .filter(
+      (element): element is HumanStroke | AsciiBlock | ShapeElement =>
+        element.kind === "humanStroke" ||
+        element.kind === "asciiBlock" ||
+        element.kind === "shape"
+    )
     .slice(-maxElements)
     .map((element) => {
       if (element.kind === "humanStroke") {
