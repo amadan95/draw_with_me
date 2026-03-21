@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
+import { Settings, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AuthControls } from "@/components/draw/auth-controls";
 import { DrawCanvas, type DrawCanvasHandle } from "@/components/draw/draw-canvas";
@@ -29,6 +30,7 @@ export function DrawApp() {
   const [ephemeralElement, setEphemeralElement] = useState<DrawingElement | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [usageBanner, setUsageBanner] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const auth = hasClerk ? useAuth() : null;
   const isSignedIn = auth?.isSignedIn ?? false;
@@ -41,6 +43,8 @@ export function DrawApp() {
     strokeSize,
     paletteIndex,
     strokeColor,
+    aiTemperature,
+    aiMaxOutputTokens,
     backgroundMode,
     currentStroke,
     turnState,
@@ -56,6 +60,8 @@ export function DrawApp() {
     setStrokeSize,
     setPaletteIndex,
     setStrokeColor,
+    setAiTemperature,
+    setAiMaxOutputTokens,
     cyclePalette,
     setTurnState,
     setThinkingText,
@@ -278,6 +284,8 @@ export function DrawApp() {
             canvasWidth: metrics.width,
             canvasHeight: metrics.height,
             palette,
+            aiTemperature,
+            aiMaxOutputTokens,
             humanDelta: getCanvasHumanContext(elements, 24),
             aiDelta: getRecentAiContext(elements, 4),
             comments,
@@ -304,11 +312,59 @@ export function DrawApp() {
     }
   };
 
+  useEffect(() => {
+    const isTextInput = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) {
+        return false;
+      }
+
+      const tagName = target.tagName.toLowerCase();
+      return (
+        tagName === "input" ||
+        tagName === "textarea" ||
+        target.isContentEditable
+      );
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== "Space" || event.repeat || isTextInput(event.target)) {
+        return;
+      }
+
+      event.preventDefault();
+      if (!isLoading) {
+        void sendTurn();
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSettingsOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [isLoading, sendTurn]);
+
   const stopTurn = () => {
     abortRef.current?.abort();
     abortRef.current = null;
     setTurnState("idle");
     setEphemeralElement(null);
+  };
+
+  const handlePrimaryAction = () => {
+    if (isLoading) {
+      stopTurn();
+      return;
+    }
+
+    void sendTurn();
   };
 
   return (
@@ -393,6 +449,56 @@ export function DrawApp() {
           ) : null}
 
           <div className="draw-dock">
+            {settingsOpen ? (
+              <div className="draw-settings-popover">
+                <div className="draw-settings-popover__head">
+                  <strong>Generation</strong>
+                  <button
+                    type="button"
+                    className="draw-settings-popover__toggle"
+                    onClick={() => setSettingsOpen(false)}
+                    aria-label="Close settings"
+                  >
+                    hide
+                  </button>
+                </div>
+
+                <label className="draw-slider-field">
+                  <span>
+                    Temperature
+                    <em>{aiTemperature.toFixed(2)}</em>
+                  </span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={aiTemperature}
+                    onChange={(event) =>
+                      setAiTemperature(Number(event.currentTarget.value))
+                    }
+                  />
+                </label>
+
+                <label className="draw-slider-field">
+                  <span>
+                    Output Tokens
+                    <em>{aiMaxOutputTokens}</em>
+                  </span>
+                  <input
+                    type="range"
+                    min="512"
+                    max="8192"
+                    step="256"
+                    value={aiMaxOutputTokens}
+                    onChange={(event) =>
+                      setAiMaxOutputTokens(Number(event.currentTarget.value))
+                    }
+                  />
+                </label>
+              </div>
+            ) : null}
+
             <div className="draw-dock-top">
               <div className="draw-tool-cluster">
                 {(["draw", "erase", "ascii", "comment"] as const).map((mode) => (
@@ -429,6 +535,8 @@ export function DrawApp() {
                 ))}
               </div>
 
+              <div className="draw-dock-divider" aria-hidden="true" />
+
               <div className="draw-palette draw-palette--dock">
                 {palette.map((color, index) => (
                   <button
@@ -446,6 +554,8 @@ export function DrawApp() {
               <button className="draw-dice-button" type="button" onClick={cyclePalette}>
                 <span aria-hidden="true">⚄</span>
               </button>
+
+              <div className="draw-dock-divider" aria-hidden="true" />
 
               <div className="draw-size-picker" aria-label="Line size">
                 {strokeSteps.map((size) => (
@@ -471,29 +581,24 @@ export function DrawApp() {
 
             <div className="draw-dock-bottom">
               <button
-                className="draw-dock-side-button"
+                className={`draw-send-button${isLoading ? " is-loading" : ""}`}
                 type="button"
-                onClick={clearBoard}
-                aria-label="Clear canvas"
+                disabled={false}
+                onClick={handlePrimaryAction}
               >
-                ⌦
-              </button>
-              <button
-                className="draw-send-button"
-                type="button"
-                disabled={isLoading}
-                onClick={() => sendTurn()}
-              >
-                <span>{isLoading ? "Thinking..." : "Send to AI"}</span>
+                <span className="draw-send-button__icon" aria-hidden="true">
+                  <Sparkles size={20} strokeWidth={2.2} />
+                </span>
+                <strong>{isLoading ? "Thinking..." : "Send to Gemini"}</strong>
                 <em>{isLoading ? "Wait" : "Space"}</em>
               </button>
               <button
-                className={`draw-dock-side-button${isLoading ? " is-alert" : ""}`}
+                className="draw-dock-settings-button"
                 type="button"
-                onClick={isLoading ? stopTurn : () => setShowThinkingPanel(!showThinkingPanel)}
-                aria-label={isLoading ? "Stop turn" : "Toggle thinking"}
+                onClick={() => setSettingsOpen((open) => !open)}
+                aria-label="Open settings"
               >
-                {isLoading ? "■" : "⚙"}
+                <Settings size={24} strokeWidth={2.2} />
               </button>
             </div>
           </div>

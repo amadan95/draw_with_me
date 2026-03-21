@@ -38,6 +38,8 @@ type DrawStore = {
   strokeSize: number;
   paletteIndex: number;
   strokeColor: string;
+  aiTemperature: number;
+  aiMaxOutputTokens: number;
   backgroundMode: CanvasBackground;
   turnState: TurnState;
   currentStroke: HumanStroke | null;
@@ -56,6 +58,8 @@ type DrawStore = {
   setStrokeSize: (size: number) => void;
   setPaletteIndex: (index: number) => void;
   setStrokeColor: (color: string) => void;
+  setAiTemperature: (value: number) => void;
+  setAiMaxOutputTokens: (value: number) => void;
   cyclePalette: () => void;
   setBackgroundMode: (mode: CanvasBackground) => void;
   setTurnState: (state: TurnState) => void;
@@ -92,6 +96,8 @@ const initialState = {
   strokeSize: 6,
   paletteIndex: 0,
   strokeColor: getPalette(0)[0],
+  aiTemperature: 0.22,
+  aiMaxOutputTokens: 4096,
   backgroundMode: "dots" as CanvasBackground,
   turnState: "idle" as TurnState,
   currentStroke: null as HumanStroke | null,
@@ -125,6 +131,14 @@ export const useDrawStore = create<DrawStore>()(
           strokeColor: getPalette(paletteIndex)[0]
         }),
       setStrokeColor: (strokeColor) => set({ strokeColor }),
+      setAiTemperature: (aiTemperature) =>
+        set({ aiTemperature: Math.min(1, Math.max(0, aiTemperature)) }),
+      setAiMaxOutputTokens: (aiMaxOutputTokens) =>
+        set({
+          aiMaxOutputTokens: Math.round(
+            Math.min(8192, Math.max(512, aiMaxOutputTokens))
+          )
+        }),
       cyclePalette: () =>
         set((state) => {
           const nextIndex = (state.paletteIndex + 1) % 5;
@@ -359,6 +373,8 @@ export const useDrawStore = create<DrawStore>()(
         turnHistory: state.turnHistory,
         paletteIndex: state.paletteIndex,
         strokeColor: state.strokeColor,
+        aiTemperature: state.aiTemperature,
+        aiMaxOutputTokens: state.aiMaxOutputTokens,
         backgroundMode: state.backgroundMode,
         lastAiElementIndex: state.lastAiElementIndex
       })

@@ -80,6 +80,30 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
+function getRequestedTemperature(input: DrawRequest, fallback: number) {
+  return clamp(
+    typeof input.aiTemperature === "number" ? input.aiTemperature : fallback,
+    0,
+    1
+  );
+}
+
+function getRequestedMaxOutputTokens(
+  input: DrawRequest,
+  fallback: number,
+  ceiling = 8192
+) {
+  return Math.round(
+    clamp(
+      typeof input.aiMaxOutputTokens === "number"
+        ? input.aiMaxOutputTokens
+        : fallback,
+      512,
+      ceiling
+    )
+  );
+}
+
 function clampFiniteNumber(value: unknown, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
@@ -1434,8 +1458,8 @@ export async function generateDrawPlan(input: DrawRequest): Promise<GeminiDrawPl
         systemText: buildDrawSystemPrompt(input),
         userText: buildDrawUserPayload(input),
         imageDataUrl: input.snapshotBase64,
-        temperature: 0.22,
-        maxOutputTokens: 4096
+        temperature: getRequestedTemperature(input, 0.22),
+        maxOutputTokens: getRequestedMaxOutputTokens(input, 4096)
       });
       break;
     } catch (error) {
@@ -1485,7 +1509,10 @@ export async function generateDrawPlan(input: DrawRequest): Promise<GeminiDrawPl
         systemText: buildDrawRepairSystemPrompt(),
         userText: buildDrawRepairUserPayload(input, rawPlan),
         temperature: 0.05,
-        maxOutputTokens: 3072
+        maxOutputTokens: Math.min(
+          3072,
+          getRequestedMaxOutputTokens(input, 3072)
+        )
       });
 
       console.info("[draw-ai] raw repaired draw plan", repairedRaw.slice(0, 2000));
@@ -1545,8 +1572,11 @@ export async function analyzeScene(input: DrawRequest): Promise<SceneAnalysis> {
         systemText: buildAnalysisSystemPrompt(input),
         userText: buildAnalysisUserPayload(input),
         imageDataUrl: input.snapshotBase64,
-        temperature: 0.16,
-        maxOutputTokens: 2048
+        temperature: getRequestedTemperature(input, 0.16),
+        maxOutputTokens: Math.min(
+          3072,
+          getRequestedMaxOutputTokens(input, 2048)
+        )
       });
       break;
     } catch (error) {

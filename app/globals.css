@@ -615,62 +615,82 @@ a {
   left: 50%;
   bottom: 18px;
   z-index: 13;
-  width: min(560px, calc(100vw - 24px));
+  width: min(760px, calc(100vw - 24px));
   transform: translateX(-50%);
   display: grid;
-  gap: 8px;
-}
-
-.draw-dock-top,
-.draw-dock-bottom {
-  background: rgba(236, 232, 225, 0.92);
-  border: 1px solid rgba(38, 37, 35, 0.08);
-  border-radius: 18px;
-  box-shadow: 0 8px 26px rgba(38, 37, 35, 0.08);
-  backdrop-filter: blur(18px);
+  gap: 12px;
 }
 
 .draw-dock-top {
-  min-height: 54px;
-  padding: 8px 10px;
-  display: grid;
-  grid-template-columns: auto auto auto;
+  background: rgba(236, 232, 225, 0.92);
+  border: 1px solid rgba(38, 37, 35, 0.08);
+  border-radius: 28px;
+  box-shadow:
+    0 12px 28px rgba(38, 37, 35, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(22px);
+}
+
+.draw-dock-top {
+  min-height: 94px;
+  padding: 14px 18px;
+  display: flex;
   align-items: center;
-  gap: 10px;
-  justify-content: center;
+  gap: 14px;
+  justify-content: flex-start;
 }
 
 .draw-tool-cluster {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
 }
 
 .draw-dock-tool,
-.draw-dice-button,
-.draw-dock-side-button {
-  width: 44px;
-  height: 44px;
-  border-radius: 14px;
+.draw-dice-button {
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
   border: none;
-  background: rgba(255, 255, 255, 0.4);
-  color: rgba(38, 37, 35, 0.72);
+  background: transparent;
+  color: rgba(103, 112, 132, 0.92);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
+  transition:
+    background 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease;
 }
 
 .draw-dock-tool.is-active {
-  background: rgba(255, 255, 255, 0.92);
-  color: rgba(38, 37, 35, 0.92);
-  box-shadow: inset 0 0 0 1px rgba(38, 37, 35, 0.08);
+  background: rgba(255, 255, 255, 0.98);
+  color: rgba(38, 37, 35, 0.9);
+  box-shadow:
+    0 10px 20px rgba(38, 37, 35, 0.1),
+    inset 0 0 0 1px rgba(38, 37, 35, 0.08);
+  transform: translateY(-1px);
+}
+
+.draw-dock-tool:hover,
+.draw-dice-button:hover,
+.draw-dock-settings-button:hover {
+  background: rgba(255, 255, 255, 0.45);
+  color: rgba(67, 76, 98, 0.96);
 }
 
 .draw-dock-tool span,
 .draw-dice-button span {
-  font-size: 24px;
+  font-size: 22px;
   line-height: 1;
+}
+
+.draw-dock-divider {
+  width: 1px;
+  height: 38px;
+  background: rgba(111, 118, 135, 0.24);
 }
 
 .draw-tool-pencil,
@@ -788,38 +808,44 @@ a {
 }
 
 .draw-palette--dock {
-  background: rgba(255, 255, 255, 0.42);
-  border-radius: 14px;
-  padding: 6px;
+  background: transparent;
+  border-radius: 18px;
+  padding: 0;
 }
 
 .draw-palette-chip {
-  width: 44px;
-  height: 32px;
+  width: 54px;
+  height: 48px;
   border: none;
-  border-radius: 10px;
+  border-radius: 14px;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.04);
+  transition: transform 160ms ease, box-shadow 160ms ease;
 }
 
 .draw-palette-chip.is-active {
-  outline: 2px solid rgba(38, 37, 35, 0.78);
-  outline-offset: -2px;
+  transform: translateY(-1px);
+  outline: 3px solid rgba(115, 126, 150, 0.9);
+  box-shadow:
+    0 0 0 4px rgba(255, 255, 255, 0.86),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.42);
+  position: relative;
+  z-index: 1;
 }
 
 .draw-size-picker {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px;
+  gap: 10px;
+  padding: 0;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.42);
+  background: transparent;
 }
 
 .draw-size-chip {
-  width: 34px;
-  height: 34px;
+  width: 28px;
+  height: 28px;
   border: none;
-  border-radius: 10px;
+  border-radius: 999px;
   background: transparent;
   display: inline-flex;
   align-items: center;
@@ -828,62 +854,169 @@ a {
 }
 
 .draw-size-chip.is-active {
-  background: rgba(255, 255, 255, 0.74);
-  box-shadow: inset 0 0 0 1px rgba(38, 37, 35, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow:
+    0 4px 12px rgba(38, 37, 35, 0.08),
+    inset 0 0 0 1px rgba(38, 37, 35, 0.08);
 }
 
 .draw-size-dot {
   display: block;
   border-radius: 999px;
-  background: rgba(38, 37, 35, 0.72);
+  background: rgba(121, 130, 148, 0.86);
 }
 
 .draw-dock-bottom {
-  min-height: 66px;
-  padding: 8px;
+  min-height: 94px;
+  padding: 0;
   display: grid;
-  grid-template-columns: 56px 1fr 56px;
+  grid-template-columns: minmax(0, 1fr) 82px;
   align-items: center;
-  gap: 8px;
-}
-
-.draw-dock-side-button {
-  width: 56px;
-  height: 50px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.52);
-  font-size: 22px;
-}
-
-.draw-dock-side-button.is-alert {
-  color: #7e2618;
+  gap: 12px;
+  background: none;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 .draw-send-button {
   min-width: 0;
-  height: 50px;
-  border: none;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.54);
-  color: rgba(38, 37, 35, 0.85);
-  padding: 0 20px;
-  display: flex;
+  height: 94px;
+  border: 1px solid rgba(38, 37, 35, 0.08);
+  border-radius: 28px;
+  background: rgba(236, 232, 225, 0.92);
+  color: rgba(62, 72, 92, 0.96);
+  padding: 0 22px;
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 14px;
+  gap: 16px;
   font-size: 18px;
+  box-shadow:
+    0 12px 28px rgba(38, 37, 35, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  transition: transform 160ms ease, box-shadow 160ms ease;
 }
 
-.draw-send-button span {
+.draw-send-button:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 16px 34px rgba(38, 37, 35, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.52);
+}
+
+.draw-send-button.is-loading {
+  color: rgba(97, 83, 53, 0.92);
+}
+
+.draw-send-button strong {
+  font-size: clamp(1.55rem, 2.8vw, 2.1rem);
+  font-weight: 550;
+  letter-spacing: -0.03em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.draw-send-button__icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(89, 97, 117, 0.9);
+  background: rgba(255, 255, 255, 0.52);
+  box-shadow: inset 0 0 0 1px rgba(38, 37, 35, 0.06);
+}
+
 .draw-send-button em {
-  font-style: italic;
-  color: rgba(38, 37, 35, 0.42);
-  font-size: 14px;
+  font-style: normal;
+  color: rgba(126, 134, 151, 0.92);
+  font-size: 0.96rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+
+.draw-dock-settings-button {
+  width: 82px;
+  height: 94px;
+  border: 1px solid rgba(38, 37, 35, 0.08);
+  border-radius: 28px;
+  background: rgba(236, 232, 225, 0.92);
+  color: rgba(97, 106, 125, 0.92);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  box-shadow:
+    0 12px 28px rgba(38, 37, 35, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(22px);
+}
+
+.draw-settings-popover {
+  position: absolute;
+  right: 0;
+  bottom: 112px;
+  width: min(320px, calc(100vw - 24px));
+  padding: 16px 18px 18px;
+  border-radius: 24px;
+  border: 1px solid rgba(38, 37, 35, 0.08);
+  background: rgba(244, 241, 236, 0.94);
+  box-shadow:
+    0 18px 42px rgba(38, 37, 35, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.48);
+  backdrop-filter: blur(24px);
+}
+
+.draw-settings-popover__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.draw-settings-popover__head strong {
+  font-size: 0.96rem;
+  letter-spacing: -0.02em;
+  color: rgba(62, 72, 92, 0.96);
+}
+
+.draw-settings-popover__toggle {
+  border: none;
+  background: transparent;
+  color: rgba(126, 134, 151, 0.92);
+  padding: 0;
+  font-size: 0.88rem;
+}
+
+.draw-slider-field {
+  display: grid;
+  gap: 8px;
+}
+
+.draw-slider-field + .draw-slider-field {
+  margin-top: 14px;
+}
+
+.draw-slider-field span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.92rem;
+  color: rgba(62, 72, 92, 0.92);
+}
+
+.draw-slider-field em {
+  font-style: normal;
+  color: rgba(108, 117, 136, 0.92);
+}
+
+.draw-slider-field input[type="range"] {
+  width: 100%;
+  accent-color: #7ea3df;
 }
 
 .draw-usage-float {
@@ -999,19 +1132,46 @@ a {
   }
 
   .draw-dock {
-    width: min(100vw - 18px, 560px);
+    width: min(100vw - 18px, 760px);
     bottom: 12px;
   }
 
   .draw-dock-top {
-    grid-template-columns: auto;
-    row-gap: 8px;
-    justify-content: stretch;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
   }
 
-  .draw-palette--dock,
-  .draw-size-picker {
-    justify-self: center;
+  .draw-dock-divider {
+    display: none;
+  }
+
+  .draw-dock-bottom {
+    grid-template-columns: minmax(0, 1fr) 72px;
+  }
+
+  .draw-send-button,
+  .draw-dock-settings-button {
+    height: 82px;
+    border-radius: 24px;
+  }
+
+  .draw-dock-settings-button {
+    width: 72px;
+  }
+
+  .draw-send-button {
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+    padding: 0 18px;
+  }
+
+  .draw-send-button strong {
+    font-size: clamp(1.2rem, 5vw, 1.6rem);
+  }
+
+  .draw-settings-popover {
+    width: min(300px, calc(100vw - 18px));
+    bottom: 98px;
   }
 
   .draw-topbar-side--right .draw-auth-chip,

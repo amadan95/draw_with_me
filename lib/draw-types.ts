@@ -599,6 +599,8 @@ export const drawRequestSchema = z.object({
   canvasWidth: z.number().positive(),
   canvasHeight: z.number().positive(),
   palette: z.array(z.string()).min(2).max(8),
+  aiTemperature: z.number().min(0).max(1).optional(),
+  aiMaxOutputTokens: z.number().int().min(512).max(8192).optional(),
   humanDelta: z.array(
     z.union([
       plannerHumanStrokeContextSchema,

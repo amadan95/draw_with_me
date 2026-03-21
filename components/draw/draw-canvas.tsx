@@ -119,7 +119,6 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
     const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, scale: 1 });
     const [gesture, setGesture] = useState<GestureState>(null);
     const [cursorPoint, setCursorPoint] = useState<Point | null>(null);
-    const [spaceHeld, setSpaceHeld] = useState(false);
     const touchStateRef = useRef<Map<number, Point>>(new Map());
     const animationFrameRef = useRef<number | null>(null);
 
@@ -184,26 +183,6 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
       }
 
       return () => observer.disconnect();
-    }, []);
-
-    useEffect(() => {
-      const handleKeyDown = (event: KeyboardEvent) => {
-        if (event.code === "Space") {
-          setSpaceHeld(true);
-        }
-      };
-      const handleKeyUp = (event: KeyboardEvent) => {
-        if (event.code === "Space") {
-          setSpaceHeld(false);
-        }
-      };
-
-      window.addEventListener("keydown", handleKeyDown);
-      window.addEventListener("keyup", handleKeyUp);
-      return () => {
-        window.removeEventListener("keydown", handleKeyDown);
-        window.removeEventListener("keyup", handleKeyUp);
-      };
     }, []);
 
     useEffect(() => {
@@ -314,7 +293,7 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
 
     const handlePointerDown = useCallback(
       (event: ReactPointerEvent<HTMLDivElement>) => {
-        if (event.button === 1 || spaceHeld) {
+        if (event.button === 1) {
           startPan({ x: event.clientX, y: event.clientY });
           return;
         }
@@ -349,7 +328,6 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
         onPlaceComment,
         onStampAscii,
         onStartStroke,
-        spaceHeld,
         startPan,
         tool
       ]
