@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Draw With Me",
-  description: "A collaborative draw-with-AI canvas built with Gemini."
+  description: "A collaborative draw-with-AI canvas built with Mistral."
 };
 
 export default function RootLayout({

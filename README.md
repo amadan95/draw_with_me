@@ -1,8 +1,8 @@
 # Draw With Me
 
-`Draw With Me` is a standalone Next.js drawing app where a human sketches on a canvas and Gemini responds as a drawing collaborator.
+`Draw With Me` is a standalone Next.js drawing app where a human sketches on a canvas and Mistral responds as a drawing collaborator.
 
-The AI does not generate a bitmap image. It looks at the current canvas, plans structured brush actions, and streams those actions back to the frontend so they animate onto the page as live drawings.
+The AI does not generate a bitmap image. It reads the scene semantically and the app renders the chosen additions locally as animated sketch strokes.
 
 ## What It Does
 
@@ -12,7 +12,7 @@ The AI does not generate a bitmap image. It looks at the current canvas, plans s
 - Live stroke animation for AI output instead of instant stamping
 - Minimal floating UI inspired by collaborative drawing tools
 - Local draft persistence with Zustand
-- Server-side Gemini integration with validation, repair, and fallback behavior
+- Server-side Mistral scene analysis with local sketch rendering
 
 ## Tech Stack
 
@@ -28,7 +28,7 @@ The AI does not generate a bitmap image. It looks at the current canvas, plans s
 
 ## AI Architecture
 
-The current AI system treats Gemini as a planner, not a painter.
+The current AI system treats Mistral as a scene analyst, not a painter.
 
 ### Request flow
 
@@ -42,46 +42,48 @@ When the user sends a turn, the client sends:
 - recent turn summaries
 - optional comment context
 
-### Planner response
+### Scene analysis response
 
-Gemini is asked to return strict JSON only. The expected shape is:
+Mistral is asked to return strict JSON only. The expected shape is:
 
 ```json
 {
-  "scene": "a simple house",
-  "approach": "add a chimney and smoke to the house",
-  "why": "this adds a common detail to a house and makes it look more lived-in and cozy",
-  "actions": [
+  "scene": "a simple house with two trees",
+  "why": "the page reads as a sparse outdoor home scene",
+  "subjects": [
     {
-      "tool": "brush",
-      "color": "#262523",
-      "width": 4,
-      "opacity": 0.9,
-      "points": [[600, 300], [595, 290], [590, 280]],
-      "timing": {
-        "speed": 1,
-        "pauseAfterMs": 120
+      "id": "subj_house_1",
+      "family": "house",
+      "label": "house",
+      "bbox": {
+        "x": 220,
+        "y": 180,
+        "width": 260,
+        "height": 240
       }
+    }
+  ],
+  "additions": [
+    {
+      "id": "add_1",
+      "family": "chimney",
+      "targetSubjectId": "subj_house_1",
+      "relation": "attach_roof_right",
+      "reason": "adds a lived-in roof detail",
+      "priority": 1
     }
   ]
 }
 ```
 
-### Validation and fallback
-
-Server-side code validates and sanitizes the planner output:
-
-- clamps coordinates to canvas bounds
-- forces colors onto the active palette
-- clamps width and opacity
-- rejects malformed actions
-- repairs malformed JSON once
-- salvages partial metadata and complete actions from truncated JSON when possible
-- falls back to deterministic scene-aware drawings if Gemini fails or returns poor geometry
-
 ### Rendering
 
-Validated planner actions are converted into internal AI stroke events and streamed to the client as NDJSON. The frontend animates those events point-by-point so the AI appears to draw live on the canvas.
+Server-side code validates and sanitizes the scene analysis, then the local sketch renderer turns the additions into internal stroke events:
+
+- addition families are normalized to local sketch recipes
+- placement is resolved against detected subjects and semantic relations
+- rendered strokes are streamed to the client as NDJSON
+- the frontend animates those events point-by-point so the AI appears to draw live on the canvas
 
 ## Project Structure
 
@@ -129,8 +131,8 @@ cp .env.example .env.local
 Current env vars:
 
 ```bash
-GEMINI_API_KEY=
-GEMINI_MODEL=gemini-2.5-flash-lite
+MISTRAL_API_KEY=
+MISTRAL_MODEL=mistral-small-latest
 
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
 CLERK_SECRET_KEY=
@@ -169,7 +171,7 @@ npm run typecheck
 
 ## Current Notes
 
-- Gemini calls stay server-side.
+- Mistral calls stay server-side.
 - The AI is optimized for structured drawing actions, not image generation.
 - The app prefers restrained collaboration, but the prompt currently encourages scene-aware additions when the drawing is sparse.
 - Upstash Redis is optional in local use. If it is not configured, quota handling falls back in memory.

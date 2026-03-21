@@ -21,24 +21,24 @@ type JsonObject = Record<string, unknown>;
 
 const relationValues = placementRelationSchema.options;
 
-class GeminiRequestError extends Error {
+class MistralRequestError extends Error {
   status: number;
 
   constructor(status: number, message: string) {
     super(message);
-    this.name = "GeminiRequestError";
+    this.name = "MistralRequestError";
     this.status = status;
   }
 }
 
-function getGeminiConfig() {
-  if (!process.env.GEMINI_API_KEY) {
+function getMistralConfig() {
+  if (!process.env.MISTRAL_API_KEY) {
     return null;
   }
 
   return {
-    apiKey: process.env.GEMINI_API_KEY,
-    model: process.env.GEMINI_MODEL || "gemini-2.5-flash-lite"
+    apiKey: process.env.MISTRAL_API_KEY,
+    model: process.env.MISTRAL_MODEL || "mistral-small-latest"
   };
 }
 
@@ -503,49 +503,50 @@ function buildAnalysisUserPayload(input: DrawRequest) {
   );
 }
 
-async function callGeminiJson(options: {
-  gemini: NonNullable<ReturnType<typeof getGeminiConfig>>;
+async function callMistralJson(options: {
+  mistral: NonNullable<ReturnType<typeof getMistralConfig>>;
   systemText: string;
   userText: string;
   imageDataUrl?: string;
   temperature?: number;
   maxOutputTokens?: number;
 }) {
-  const parts: Array<
-    | { text: string }
-    | { inlineData: { mimeType: string; data: string } }
-  > = [{ text: options.userText }];
+  const userContent: Array<
+    | { type: "text"; text: string }
+    | { type: "image_url"; image_url: string }
+  > = [{ type: "text", text: options.userText }];
 
   if (options.imageDataUrl) {
-    const image = splitDataUrl(options.imageDataUrl);
-    parts.push({
-      inlineData: {
-        mimeType: image.mimeType,
-        data: image.data
-      }
+    splitDataUrl(options.imageDataUrl);
+    userContent.push({
+      type: "image_url",
+      image_url: options.imageDataUrl
     });
   }
 
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${options.gemini.model}:generateContent?key=${options.gemini.apiKey}`,
+    "https://api.mistral.ai/v1/chat/completions",
     {
       method: "POST",
       headers: {
+        "Authorization": `Bearer ${options.mistral.apiKey}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        systemInstruction: {
-          parts: [{ text: options.systemText }]
+        model: options.mistral.model,
+        temperature: options.temperature ?? 0.18,
+        max_tokens: options.maxOutputTokens ?? 1536,
+        response_format: {
+          type: "json_object"
         },
-        generationConfig: {
-          temperature: options.temperature ?? 0.18,
-          responseMimeType: "application/json",
-          maxOutputTokens: options.maxOutputTokens ?? 1536
-        },
-        contents: [
+        messages: [
+          {
+            role: "system",
+            content: options.systemText
+          },
           {
             role: "user",
-            parts
+            content: userContent
           }
         ]
       })
@@ -554,30 +555,35 @@ async function callGeminiJson(options: {
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
-    throw new GeminiRequestError(
+    throw new MistralRequestError(
       response.status,
-      `Gemini request failed with ${response.status}${errorText ? `: ${errorText}` : "."}`
+      `Mistral request failed with ${response.status}${errorText ? `: ${errorText}` : "."}`
     );
   }
 
   const payload = (await response.json()) as {
-    candidates?: Array<{
-      content?: {
-        parts?: Array<{
-          text?: string;
-        }>;
+    choices?: Array<{
+      message?: {
+        content?:
+          | string
+          | Array<{
+              type?: string;
+              text?: string;
+            }>;
       };
     }>;
   };
 
   const rawText =
-    payload.candidates?.[0]?.content?.parts
-      ?.map((part) => part.text ?? "")
-      .join("")
-      .trim() ?? "";
+    typeof payload.choices?.[0]?.message?.content === "string"
+      ? payload.choices[0].message.content.trim()
+      : payload.choices?.[0]?.message?.content
+          ?.map((part) => part.text ?? "")
+          .join("")
+          .trim() ?? "";
 
   if (!rawText) {
-    throw new Error("Gemini returned an empty response.");
+    throw new Error("Mistral returned an empty response.");
   }
 
   return rawText;
@@ -589,18 +595,18 @@ function parseSceneAnalysis(rawText: string, input: DrawRequest): SceneAnalysis 
 }
 
 export async function analyzeScene(input: DrawRequest): Promise<SceneAnalysis> {
-  const gemini = getGeminiConfig();
-  if (!gemini) {
-    console.info("[draw-ai] Gemini not configured; skipping scene analysis");
-    return buildFallbackSceneAnalysis("Gemini is not configured.");
+  const mistral = getMistralConfig();
+  if (!mistral) {
+    console.info("[draw-ai] Mistral not configured; skipping scene analysis");
+    return buildFallbackSceneAnalysis("Mistral is not configured.");
   }
 
   let rawAnalysis = "";
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      rawAnalysis = await callGeminiJson({
-        gemini,
+      rawAnalysis = await callMistralJson({
+        mistral,
         systemText: buildAnalysisSystemPrompt(input),
         userText: buildAnalysisUserPayload(input),
         imageDataUrl: input.snapshotBase64,
@@ -610,7 +616,7 @@ export async function analyzeScene(input: DrawRequest): Promise<SceneAnalysis> {
       break;
     } catch (error) {
       const isTransient =
-        error instanceof GeminiRequestError &&
+        error instanceof MistralRequestError &&
         [429, 500, 503].includes(error.status);
 
       if (isTransient && attempt === 0) {
