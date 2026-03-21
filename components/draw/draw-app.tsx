@@ -108,12 +108,19 @@ export function DrawApp() {
         case "stroke": {
           const fullStroke = event.stroke;
           const strokeSpeed = Math.min(
-            3,
-            Math.max(0.2, fullStroke.timing?.speed ?? 1)
+            1.25,
+            Math.max(0.2, fullStroke.timing?.speed ?? 0.65)
           );
-          const pointsPerStep =
-            strokeSpeed >= 1.8 ? 4 : strokeSpeed >= 1.2 ? 3 : strokeSpeed >= 0.8 ? 2 : 1;
-          const frameDelay = Math.max(10, Math.round(24 / strokeSpeed));
+          const pointsPerStep = 1;
+          const minimumDuration = fullStroke.points.length <= 4 ? 320 : 420;
+          const totalDuration = Math.max(
+            minimumDuration,
+            Math.round((fullStroke.points.length * 64) / strokeSpeed)
+          );
+          const frameDelay = Math.max(
+            32,
+            Math.round(totalDuration / Math.max(1, fullStroke.points.length))
+          );
 
           for (
             let index = pointsPerStep;

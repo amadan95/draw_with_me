@@ -37,15 +37,6 @@ export type StrokeTiming = {
   pauseAfterMs?: number;
 };
 
-export type RenderHint =
-  | "stacked_rect"
-  | "puff_chain"
-  | "tuft_cluster"
-  | "oval_cluster"
-  | "tapered_strip";
-
-export type ObjectSize = "small" | "medium" | "large";
-
 export type ObjectBoundingBox = {
   x: number;
   y: number;
@@ -53,21 +44,43 @@ export type ObjectBoundingBox = {
   height: number;
 };
 
-export type ObjectProposal = {
+export type ObjectFamily = string;
+
+export type PlacementRelation =
+  | "attach_roof_left"
+  | "attach_roof_center"
+  | "attach_roof_right"
+  | "ground_front"
+  | "ground_left"
+  | "ground_right"
+  | "sky_above"
+  | "sky_above_left"
+  | "sky_above_right"
+  | "beside_left"
+  | "beside_right"
+  | "around_subject";
+
+export type SceneSubject = {
   id: string;
+  family: ObjectFamily;
   label: string;
-  reason: string;
-  anchor: [number, number];
   bbox: ObjectBoundingBox;
-  size: ObjectSize;
+};
+
+export type SceneAddition = {
+  id: string;
+  family: ObjectFamily;
+  targetSubjectId?: string;
+  relation: PlacementRelation;
+  reason: string;
   priority: number;
-  renderHint: RenderHint;
 };
 
 export type SceneAnalysis = {
   scene: string;
   why: string;
-  additions: ObjectProposal[];
+  subjects: SceneSubject[];
+  additions: SceneAddition[];
 };
 
 export type CompiledObjectAction = {
@@ -79,9 +92,9 @@ export type CompiledObjectAction = {
   timing?: StrokeTiming;
 };
 
-export type CompiledObjectPlan = {
-  objectId: string;
-  label: string;
+export type RenderedRecipe = {
+  addition: SceneAddition;
+  targetSubject?: SceneSubject | null;
   actions: CompiledObjectAction[];
 };
 
@@ -202,12 +215,21 @@ export const pointSchema = z.object({
   pressure: z.number().finite().optional()
 });
 
-export const renderHintSchema = z.enum([
-  "stacked_rect",
-  "puff_chain",
-  "tuft_cluster",
-  "oval_cluster",
-  "tapered_strip"
+export const objectFamilySchema = z.string().min(1).max(80);
+
+export const placementRelationSchema = z.enum([
+  "attach_roof_left",
+  "attach_roof_center",
+  "attach_roof_right",
+  "ground_front",
+  "ground_left",
+  "ground_right",
+  "sky_above",
+  "sky_above_left",
+  "sky_above_right",
+  "beside_left",
+  "beside_right",
+  "around_subject"
 ]);
 
 export const objectBoundingBoxSchema = z.object({
@@ -217,21 +239,27 @@ export const objectBoundingBoxSchema = z.object({
   height: z.number().positive()
 });
 
-export const objectProposalSchema = z.object({
+export const sceneSubjectSchema = z.object({
   id: z.string(),
+  family: objectFamilySchema,
   label: z.string().min(1).max(80),
+  bbox: objectBoundingBoxSchema
+});
+
+export const sceneAdditionSchema = z.object({
+  id: z.string(),
+  family: objectFamilySchema,
+  targetSubjectId: z.string().optional(),
+  relation: placementRelationSchema,
   reason: z.string().min(1).max(160),
-  anchor: z.tuple([z.number().finite(), z.number().finite()]),
-  bbox: objectBoundingBoxSchema,
-  size: z.enum(["small", "medium", "large"]),
-  priority: z.number().int().min(1).max(9),
-  renderHint: renderHintSchema
+  priority: z.number().int().min(1).max(9)
 });
 
 export const sceneAnalysisSchema = z.object({
   scene: z.string().min(1).max(160),
   why: z.string().min(1).max(200),
-  additions: z.array(objectProposalSchema).max(3)
+  subjects: z.array(sceneSubjectSchema).max(12),
+  additions: z.array(sceneAdditionSchema).max(5)
 });
 
 export const compiledObjectActionSchema = z.object({
@@ -246,12 +274,6 @@ export const compiledObjectActionSchema = z.object({
       pauseAfterMs: z.number().int().min(0).max(1200).optional()
     })
     .optional()
-});
-
-export const compiledObjectPlanSchema = z.object({
-  objectId: z.string(),
-  label: z.string().min(1).max(80),
-  actions: z.array(compiledObjectActionSchema).max(4)
 });
 
 export const humanStrokeSchema = z.object({

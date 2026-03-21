@@ -1,18 +1,16 @@
 import {
   type DrawRequestMode,
   type DrawStreamEvent,
+  type RenderedRecipe,
+  type SceneAddition,
   aiStrokeSchema,
   commentPinSchema,
   createId,
   drawRequestSchema,
-  type ObjectProposal,
   type SceneAnalysis
 } from "@/lib/draw-types";
-import {
-  analyzeScene,
-  compileObjectDrawing,
-  type CompiledObjectResult
-} from "@/lib/ai";
+import { analyzeScene } from "@/lib/ai";
+import { describeRenderedAddition, renderSceneAddition } from "@/lib/sketch-renderer";
 import { getRequestIdentity } from "@/lib/auth";
 import { loadingMessages } from "@/lib/loading-messages";
 import { consumeDailyQuota } from "@/lib/quota";
@@ -60,14 +58,14 @@ function buildSceneThinking(analysis: SceneAnalysis) {
 function buildRenderedSummary(
   mode: DrawRequestMode,
   analysis: SceneAnalysis,
-  rendered: CompiledObjectResult[]
+  rendered: RenderedRecipe[]
 ) {
-  const labels = rendered.map((result) => result.proposal.label);
-  if (labels.length === 0) {
+  const descriptions = rendered.map((result) => describeRenderedAddition(result));
+  if (descriptions.length === 0) {
     return `I read this as ${analysis.scene}, but no reliable addition was rendered.`;
   }
 
-  const labelText = formatLabelList(labels);
+  const labelText = formatLabelList(descriptions);
   if (mode === "comment") {
     return `I read this as ${analysis.scene} and replied with ${labelText} because ${analysis.why}.`;
   }
@@ -77,18 +75,51 @@ function buildRenderedSummary(
 
 function buildCommentReplyText(
   analysis: SceneAnalysis,
-  rendered: CompiledObjectResult[]
+  rendered: RenderedRecipe[]
 ) {
-  const labels = rendered.map((result) => result.proposal.label);
-  if (labels.length === 0) {
+  const descriptions = rendered.map((result) => describeRenderedAddition(result));
+  if (descriptions.length === 0) {
     return "I couldn't render a reliable addition yet.";
   }
 
-  return `I added ${formatLabelList(labels)} because ${analysis.why}.`;
+  return `I added ${formatLabelList(descriptions)} because ${analysis.why}.`;
 }
 
 function pointDistance(a: [number, number], b: { x: number; y: number }) {
   return Math.hypot(a[0] - b.x, a[1] - b.y);
+}
+
+function getAdditionReferencePoint(
+  addition: SceneAddition,
+  analysis: SceneAnalysis,
+  input: ReturnType<typeof drawRequestSchema.parse>
+) {
+  const target = addition.targetSubjectId
+    ? analysis.subjects.find((subject) => subject.id === addition.targetSubjectId) ?? null
+    : null;
+
+  if (target) {
+    return [
+      target.bbox.x + target.bbox.width * 0.5,
+      target.bbox.y + target.bbox.height * 0.5
+    ] as [number, number];
+  }
+
+  if (analysis.subjects.length > 0) {
+    const total = analysis.subjects.reduce(
+      (sum, subject) => ({
+        x: sum.x + subject.bbox.x + subject.bbox.width * 0.5,
+        y: sum.y + subject.bbox.y + subject.bbox.height * 0.5
+      }),
+      { x: 0, y: 0 }
+    );
+    return [
+      total.x / analysis.subjects.length,
+      total.y / analysis.subjects.length
+    ] as [number, number];
+  }
+
+  return [input.canvasWidth * 0.5, input.canvasHeight * 0.5] as [number, number];
 }
 
 function selectAdditions(
@@ -107,7 +138,8 @@ function selectAdditions(
     return additions
       .sort((left, right) => {
         const distanceDelta =
-          pointDistance(left.anchor, target) - pointDistance(right.anchor, target);
+          pointDistance(getAdditionReferencePoint(left, analysis, input), target) -
+          pointDistance(getAdditionReferencePoint(right, analysis, input), target);
         if (Math.abs(distanceDelta) > 1) {
           return distanceDelta;
         }
@@ -116,16 +148,16 @@ function selectAdditions(
       .slice(0, 1);
   }
 
-  return additions.sort((left, right) => left.priority - right.priority).slice(0, 2);
+  return additions.sort((left, right) => left.priority - right.priority).slice(0, 5);
 }
 
-function compiledResultToEvents(
-  result: CompiledObjectResult,
+function renderedRecipeToEvents(
+  recipe: RenderedRecipe,
   input: ReturnType<typeof drawRequestSchema.parse>
 ) {
   const events: DrawStreamEvent[] = [];
 
-  for (const action of result.plan.actions) {
+  for (const action of recipe.actions) {
     ensureColor(action.color, input.palette);
     const strokePoints = action.points.map(([x, y]) => {
       ensureInBounds(x, input.canvasWidth, "Point x");
@@ -141,9 +173,9 @@ function compiledResultToEvents(
       opacity: action.opacity,
       size: action.width,
       points: strokePoints,
-      label: result.proposal.reason,
-      objectId: result.proposal.id,
-      objectLabel: result.proposal.label,
+      label: recipe.addition.reason,
+      objectId: recipe.addition.id,
+      objectLabel: recipe.addition.family,
       timing: action.timing
     });
 
@@ -236,20 +268,20 @@ export async function handleDrawRequest(
           text: buildSceneThinking(analysis)
         });
 
-        const rendered: CompiledObjectResult[] = [];
+        const rendered: RenderedRecipe[] = [];
 
-        for (const proposal of selectedAdditions) {
+        for (const addition of selectedAdditions) {
           if (request.signal.aborted) {
             break;
           }
 
-          const compiled = await compileObjectDrawing(turnInput, analysis, proposal);
-          if (!compiled) {
+          const recipe = renderSceneAddition(analysis, addition, turnInput);
+          if (!recipe) {
             continue;
           }
 
-          rendered.push(compiled);
-          const events = compiledResultToEvents(compiled, turnInput);
+          rendered.push(recipe);
+          const events = renderedRecipeToEvents(recipe, turnInput);
 
           for (const event of events) {
             if (request.signal.aborted) {
