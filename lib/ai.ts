@@ -1059,7 +1059,7 @@ function normalizePlannedEvent(
     return plannedDrawEventSchema.parse({
       type: "stroke",
       color: normalizePaletteColor(value.color, input.palette),
-      width: clamp(clampFiniteNumber(value.width, 5), 1, 24),
+      width: input.activeStrokeSize,
       opacity: clamp(clampFiniteNumber(value.opacity, 0.92), 0.05, 1),
       points,
       timing: isJsonObject(value.timing)
@@ -1112,10 +1112,7 @@ function normalizePlannedEvent(
           ? undefined
           : clamp(clampFiniteNumber(value.rotation, 0), -Math.PI * 2, Math.PI * 2),
       fill: sanitizeShapeFill(value.fill, shape, color, width, height, input),
-      strokeWidth:
-        value.strokeWidth === undefined
-          ? undefined
-          : clamp(clampFiniteNumber(value.strokeWidth, 2), 1, 24)
+      strokeWidth: input.activeStrokeSize
     });
   }
 
@@ -1239,7 +1236,10 @@ function buildDrawSystemPrompt(input: DrawRequest) {
     "You are drawing, not describing a future drawing.",
     "Prefer actual visual events over narration.",
     "Stay inside the canvas bounds.",
+    "Choose colors adaptively from the provided palette based on what fits the drawing best.",
+    "Do not default every mark to the same dark outline color unless the picture genuinely calls for it.",
     "Use only colors from the provided palette.",
+    "Match every stroke width and every shape outline width to the provided active ink width.",
     "Prefer a few coherent additions that fit the picture.",
     "Think in objects and object parts, not random marks.",
     "If you add a tree, draw a trunk and canopy. If you add a chimney, attach it to the roof and optionally add smoke. If you add a path, start it near the doorway or foreground groundline. If you add a cloud, use a compact cluster instead of one huge line.",
@@ -1309,6 +1309,9 @@ function buildDrawUserPayload(input: DrawRequest) {
       canvas: {
         width: input.canvasWidth,
         height: input.canvasHeight
+      },
+      activeInk: {
+        width: input.activeStrokeSize
       },
       pageContext: {
         sceneCoverage: Number(sceneCoverage.toFixed(3)),

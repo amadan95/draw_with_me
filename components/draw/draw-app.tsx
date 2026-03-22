@@ -10,6 +10,7 @@ import { useDrawStore } from "@/lib/draw-store";
 import {
   type DrawStreamEvent,
   type DrawingElement,
+  type Point,
   createId,
   getPalette,
 } from "@/lib/draw-types";
@@ -24,6 +25,82 @@ import {
 
 const hasClerk = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 const strokeSteps = [3, 6, 12] as const;
+
+function getStrokeMeasurements(points: Point[]) {
+  const cumulativeDistances = [0];
+  let totalLength = 0;
+
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    totalLength += Math.hypot(current.x - previous.x, current.y - previous.y);
+    cumulativeDistances.push(totalLength);
+  }
+
+  return {
+    cumulativeDistances,
+    totalLength
+  };
+}
+
+function interpolatePoint(start: Point, end: Point, t: number): Point {
+  return {
+    x: start.x + (end.x - start.x) * t,
+    y: start.y + (end.y - start.y) * t
+  };
+}
+
+function getSegmentAngle(start: Point, end: Point) {
+  return Math.atan2(end.y - start.y, end.x - start.x) * (180 / Math.PI);
+}
+
+function sampleStrokeAtDistance(
+  points: Point[],
+  cumulativeDistances: number[],
+  travelDistance: number
+) {
+  if (points.length < 2) {
+    return {
+      partialPoints: points,
+      angle: -10
+    };
+  }
+
+  const totalLength = cumulativeDistances[cumulativeDistances.length - 1] ?? 0;
+  const clampedDistance = Math.max(0, Math.min(totalLength, travelDistance));
+  const partialPoints: Point[] = [points[0]];
+
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    const segmentStart = cumulativeDistances[index - 1] ?? 0;
+    const segmentEnd = cumulativeDistances[index] ?? segmentStart;
+
+    if (clampedDistance >= segmentEnd) {
+      partialPoints.push(current);
+      continue;
+    }
+
+    const segmentLength = segmentEnd - segmentStart;
+    const segmentProgress =
+      segmentLength <= 0 ? 1 : (clampedDistance - segmentStart) / segmentLength;
+    partialPoints.push(interpolatePoint(previous, current, segmentProgress));
+
+    return {
+      partialPoints,
+      angle: getSegmentAngle(previous, current)
+    };
+  }
+
+  return {
+    partialPoints: points,
+    angle: getSegmentAngle(points[points.length - 2], points[points.length - 1])
+  };
+}
+
+function easeInOutSine(progress: number) {
+  return -(Math.cos(Math.PI * progress) - 1) * 0.5;
+}
 
 export function DrawApp() {
   const canvasRef = useRef<DrawCanvasHandle | null>(null);
@@ -158,28 +235,44 @@ export function DrawApp() {
             1.25,
             Math.max(0.2, fullStroke.timing?.speed ?? 0.65)
           );
-          const pointsPerStep = 1;
-          const minimumDuration = fullStroke.points.length <= 4 ? 320 : 420;
+          const { cumulativeDistances, totalLength } = getStrokeMeasurements(fullStroke.points);
+          const pixelsPerSecond = 95 + strokeSpeed * 110;
+          const minimumDuration = totalLength < 56 ? 420 : 620;
           const totalDuration = Math.max(
             minimumDuration,
-            Math.round((fullStroke.points.length * 64) / strokeSpeed)
-          );
-          const frameDelay = Math.max(
-            32,
-            Math.round(totalDuration / Math.max(1, fullStroke.points.length))
+            Math.min(4200, Math.round((totalLength / pixelsPerSecond) * 1000))
           );
 
-          for (
-            let index = pointsPerStep;
-            index <= fullStroke.points.length;
-            index += pointsPerStep
-          ) {
-            setEphemeralElement({
-              ...fullStroke,
-              points: fullStroke.points.slice(0, Math.min(index, fullStroke.points.length))
-            });
-            await new Promise((resolve) => setTimeout(resolve, frameDelay));
-          }
+          await new Promise<void>((resolve) => {
+            const startTime = performance.now();
+
+            const animateStroke = (now: number) => {
+              const rawProgress = Math.min(1, (now - startTime) / totalDuration);
+              const easedProgress = easeInOutSine(rawProgress);
+              const { partialPoints } = sampleStrokeAtDistance(
+                fullStroke.points,
+                cumulativeDistances,
+                totalLength * easedProgress
+              );
+
+              setEphemeralElement({
+                ...fullStroke,
+                points: partialPoints
+              });
+
+              if (rawProgress < 1) {
+                window.requestAnimationFrame(animateStroke);
+                return;
+              }
+
+              resolve();
+            };
+
+            window.requestAnimationFrame(animateStroke);
+          });
+
+          setEphemeralElement(fullStroke);
+          await new Promise((resolve) => setTimeout(resolve, 42));
           setEphemeralElement(null);
           addAiElement(fullStroke);
           if (fullStroke.timing?.pauseAfterMs) {
@@ -334,6 +427,7 @@ export function DrawApp() {
             snapshotBase64: snapshot,
             canvasWidth: metrics.width,
             canvasHeight: metrics.height,
+            activeStrokeSize: strokeSize,
             palette,
             aiTemperature,
             aiMaxOutputTokens,

@@ -196,6 +196,29 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
       [viewport]
     );
 
+    const aiCursorPoint = useMemo(() => {
+      if (!ephemeralElement || ephemeralElement.kind === "humanStroke") {
+        return null;
+      }
+
+      if (ephemeralElement.kind === "aiStroke") {
+        const tip = ephemeralElement.points[ephemeralElement.points.length - 1];
+        return tip ? convertWorldToClient(tip) : null;
+      }
+
+      if (ephemeralElement.kind === "shape") {
+        return convertWorldToClient({
+          x: ephemeralElement.x,
+          y: ephemeralElement.y
+        });
+      }
+
+      return convertWorldToClient({
+        x: ephemeralElement.x,
+        y: ephemeralElement.y
+      });
+    }, [convertWorldToClient, ephemeralElement]);
+
     useEffect(() => {
       const observer = new ResizeObserver((entries) => {
         const entry = entries[0];
@@ -688,7 +711,16 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
           ) : null}
         </div>
 
-        {cursorPoint && tool === "draw" ? (
+        {aiCursorPoint ? (
+          <div
+            className="draw-pen-cursor"
+            style={{ left: aiCursorPoint.x, top: aiCursorPoint.y }}
+          >
+            <PenCursorIcon variant="gemini" className="draw-pen-cursor__icon" />
+          </div>
+        ) : null}
+
+        {!aiCursorPoint && cursorPoint && tool === "draw" ? (
           <div
             className="draw-pen-cursor"
             style={{ left: cursorPoint.x, top: cursorPoint.y }}

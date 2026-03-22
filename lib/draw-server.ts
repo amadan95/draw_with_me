@@ -175,7 +175,7 @@ function renderedRecipeToEvents(
       kind: "aiStroke",
       color: action.color,
       opacity: action.opacity,
-      size: action.width,
+      size: input.activeStrokeSize,
       points: strokePoints,
       label: recipe.addition.reason,
       objectId: recipe.addition.id,
@@ -233,7 +233,7 @@ function plannedEventToStreamEvents(
       kind: "aiStroke",
       color: event.color,
       opacity: event.opacity ?? 0.92,
-      size: event.width,
+      size: input.activeStrokeSize,
       points: event.points.map(([x, y]) => {
         ensureInBounds(x, input.canvasWidth, "Point x");
         ensureInBounds(y, input.canvasHeight, "Point y");
@@ -261,7 +261,7 @@ function plannedEventToStreamEvents(
       height: event.height,
       rotation: event.rotation,
       fill: event.fill,
-      strokeWidth: event.strokeWidth
+      strokeWidth: input.activeStrokeSize
     });
 
     ensureInBounds(shape.x, input.canvasWidth, "Shape x");

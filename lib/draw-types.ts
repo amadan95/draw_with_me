@@ -598,6 +598,7 @@ export const drawRequestSchema = z.object({
   snapshotBase64: z.string().startsWith("data:image/"),
   canvasWidth: z.number().positive(),
   canvasHeight: z.number().positive(),
+  activeStrokeSize: z.number().positive().max(24),
   palette: z.array(z.string()).min(2).max(8),
   aiTemperature: z.number().min(0).max(1).optional(),
   aiMaxOutputTokens: z.number().int().min(512).max(8192).optional(),
