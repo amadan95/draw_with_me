@@ -21,6 +21,7 @@ import {
 } from "@/lib/draw-types";
 import {
   clamp,
+  getDrawingBounds,
   elementsToSvg,
   renderDrawing,
   type Viewport,
@@ -36,11 +37,18 @@ export type DrawCanvasHandle = {
     quality?: number;
   }) => string;
   exportSvg: () => string;
-  getCanvasMetrics: () => { width: number; height: number };
+  getCanvasMetrics: () => {
+    width: number;
+    height: number;
+    originX: number;
+    originY: number;
+  };
 };
 
-const WORLD_WIDTH = 1600;
-const WORLD_HEIGHT = 1000;
+const DEFAULT_SNAPSHOT_WIDTH = 1600;
+const DEFAULT_SNAPSHOT_HEIGHT = 1000;
+const SNAPSHOT_PADDING = 140;
+const INITIAL_VIEW_PADDING = 180;
 
 type DrawCanvasProps = {
   elements: DrawingElement[];
@@ -124,25 +132,48 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
     const [cursorPoint, setCursorPoint] = useState<Point | null>(null);
     const touchStateRef = useRef<Map<number, Point>>(new Map());
     const animationFrameRef = useRef<number | null>(null);
+    const hasInitializedViewportRef = useRef(false);
 
-    const fitScale = useMemo(
+    const sceneBounds = useMemo(
       () =>
-        Math.min(
-          containerSize.width / WORLD_WIDTH,
-          containerSize.height / WORLD_HEIGHT
+        getDrawingBounds(
+          elements,
+          comments,
+          currentStroke,
+          INITIAL_VIEW_PADDING,
+          DEFAULT_SNAPSHOT_WIDTH,
+          DEFAULT_SNAPSHOT_HEIGHT
         ),
-      [containerSize.height, containerSize.width]
+      [comments, currentStroke, elements]
     );
 
-    const worldOffset = useMemo(
-      () => ({
-        x: (containerSize.width - WORLD_WIDTH * fitScale) / 2,
-        y: (containerSize.height - WORLD_HEIGHT * fitScale) / 2
-      }),
-      [containerSize.height, containerSize.width, fitScale]
-    );
+    const totalScale = viewport.scale;
 
-    const totalScale = fitScale * viewport.scale;
+    useEffect(() => {
+      if (hasInitializedViewportRef.current) {
+        return;
+      }
+
+      const nextScale = clamp(
+        Math.min(
+          Math.max(1, containerSize.width - 72) / Math.max(1, sceneBounds.width),
+          Math.max(1, containerSize.height - 140) / Math.max(1, sceneBounds.height)
+        ),
+        0.3,
+        1
+      );
+
+      setViewport({
+        scale: nextScale,
+        x:
+          containerSize.width * 0.5 -
+          (sceneBounds.minX + sceneBounds.width * 0.5) * nextScale,
+        y:
+          containerSize.height * 0.5 -
+          (sceneBounds.minY + sceneBounds.height * 0.5) * nextScale
+      });
+      hasInitializedViewportRef.current = true;
+    }, [containerSize.height, containerSize.width, sceneBounds]);
 
     const convertClientToWorld = useCallback(
       (clientX: number, clientY: number) => {
@@ -152,21 +183,17 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
         }
 
         return {
-          x: (clientX - rect.left - worldOffset.x - viewport.x) / totalScale,
-          y: (clientY - rect.top - worldOffset.y - viewport.y) / totalScale
+          x: (clientX - rect.left - viewport.x) / totalScale,
+          y: (clientY - rect.top - viewport.y) / totalScale
         };
       },
-      [totalScale, viewport.x, viewport.y, worldOffset.x, worldOffset.y]
+      [totalScale, viewport.x, viewport.y]
     );
 
     const convertWorldToClient = useCallback(
       (point: Point) =>
-        worldToScreen(point, {
-          x: worldOffset.x + viewport.x,
-          y: worldOffset.y + viewport.y,
-          scale: totalScale
-        }),
-      [totalScale, viewport.x, viewport.y, worldOffset.x, worldOffset.y]
+        worldToScreen(point, viewport),
+      [viewport]
     );
 
     useEffect(() => {
@@ -212,13 +239,13 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
           0,
           0,
           ratio * totalScale,
-          ratio * (worldOffset.x + viewport.x),
-          ratio * (worldOffset.y + viewport.y)
+          ratio * viewport.x,
+          ratio * viewport.y
         );
         renderDrawing(
           ctx,
-          WORLD_WIDTH,
-          WORLD_HEIGHT,
+          containerSize.width,
+          containerSize.height,
           ephemeralElement ? [...elements, ephemeralElement] : elements,
           currentStroke,
           { motionTimeMs: time }
@@ -243,9 +270,22 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
       totalScale,
       viewport.x,
       viewport.y,
-      worldOffset.x,
-      worldOffset.y
+      containerSize.height,
+      containerSize.width
     ]);
+
+    const snapshotBounds = useMemo(
+      () =>
+        getDrawingBounds(
+          elements,
+          comments,
+          currentStroke,
+          SNAPSHOT_PADDING,
+          DEFAULT_SNAPSHOT_WIDTH,
+          DEFAULT_SNAPSHOT_HEIGHT
+        ),
+      [comments, currentStroke, elements]
+    );
 
     useImperativeHandle(
       ref,
@@ -255,32 +295,68 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
           const maxHeight = options?.maxHeight ?? 400;
           const scale = Math.min(
             1,
-            maxWidth / WORLD_WIDTH,
-            maxHeight / WORLD_HEIGHT
+            maxWidth / snapshotBounds.width,
+            maxHeight / snapshotBounds.height
           );
           const exportCanvas = document.createElement("canvas");
-          exportCanvas.width = Math.max(1, Math.round(WORLD_WIDTH * scale));
-          exportCanvas.height = Math.max(1, Math.round(WORLD_HEIGHT * scale));
+          exportCanvas.width = Math.max(1, Math.round(snapshotBounds.width * scale));
+          exportCanvas.height = Math.max(1, Math.round(snapshotBounds.height * scale));
           const ctx = exportCanvas.getContext("2d");
           if (!ctx) {
             return "";
           }
           ctx.scale(scale, scale);
           ctx.fillStyle = "#faf9f7";
-          ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
-          renderDrawing(ctx, WORLD_WIDTH, WORLD_HEIGHT, elements);
+          ctx.fillRect(0, 0, snapshotBounds.width, snapshotBounds.height);
+          ctx.translate(-snapshotBounds.minX, -snapshotBounds.minY);
+          renderDrawing(ctx, snapshotBounds.width, snapshotBounds.height, elements);
           return exportCanvas.toDataURL(
             options?.mimeType ?? "image/jpeg",
             options?.quality ?? 0.72
           );
         },
-        exportSvg: () => elementsToSvg(elements, WORLD_WIDTH, WORLD_HEIGHT),
+        exportSvg: () => {
+          const translatedElements = elements.map((element) => {
+            switch (element.kind) {
+              case "humanStroke":
+              case "aiStroke":
+                return {
+                  ...element,
+                  points: element.points.map((point) => ({
+                    ...point,
+                    x: point.x - snapshotBounds.minX,
+                    y: point.y - snapshotBounds.minY
+                  }))
+                };
+              case "shape":
+                return {
+                  ...element,
+                  x: element.x - snapshotBounds.minX,
+                  y: element.y - snapshotBounds.minY
+                };
+              case "asciiBlock":
+                return {
+                  ...element,
+                  x: element.x - snapshotBounds.minX,
+                  y: element.y - snapshotBounds.minY
+                };
+            }
+          });
+
+          return elementsToSvg(
+            translatedElements,
+            snapshotBounds.width,
+            snapshotBounds.height
+          );
+        },
         getCanvasMetrics: () => ({
-          width: WORLD_WIDTH,
-          height: WORLD_HEIGHT
+          width: Math.round(snapshotBounds.width),
+          height: Math.round(snapshotBounds.height),
+          originX: snapshotBounds.minX,
+          originY: snapshotBounds.minY
         })
       }),
-      [elements]
+      [comments, currentStroke, elements, snapshotBounds]
     );
 
     const startPan = useCallback(
@@ -306,24 +382,19 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
           return;
         }
 
-        const clamped = {
-          x: clamp(worldPoint.x, 0, WORLD_WIDTH),
-          y: clamp(worldPoint.y, 0, WORLD_HEIGHT)
-        };
-
         if (tool === "draw" || tool === "erase") {
           setGesture({ type: "draw" });
-          onStartStroke(clamped);
+          onStartStroke(worldPoint);
           return;
         }
 
         if (tool === "ascii") {
-          onStampAscii(clamped);
+          onStampAscii(worldPoint);
           return;
         }
 
         if (tool === "comment") {
-          onPlaceComment(clamped);
+          onPlaceComment(worldPoint);
         }
       },
       [
@@ -385,8 +456,8 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
         event.preventDefault();
         const nextScale = clamp(
           viewport.scale + (event.deltaY < 0 ? 0.08 : -0.08),
-          0.65,
-          2.6
+          0.24,
+          3.2
         );
 
         const rect = containerRef.current?.getBoundingClientRect();
@@ -395,8 +466,8 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
         }
 
         const pointer = {
-          x: event.clientX - rect.left - worldOffset.x,
-          y: event.clientY - rect.top - worldOffset.y
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top
         };
         const scaleRatio = nextScale / viewport.scale;
         setViewport((current) => ({
@@ -405,7 +476,7 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
           y: pointer.y - (pointer.y - current.y) * scaleRatio
         }));
       },
-      [viewport.scale, worldOffset.x, worldOffset.y]
+      [viewport.scale]
     );
 
     const handleTouchStart = useCallback(
@@ -476,7 +547,7 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
           };
           const scaleRatio = nextDistance / gesture.startDistance;
           setViewport({
-            scale: clamp(gesture.startViewport.scale * scaleRatio, 0.65, 2.6),
+            scale: clamp(gesture.startViewport.scale * scaleRatio, 0.24, 3.2),
             x:
               gesture.startViewport.x + (center.x - gesture.startCenter.x),
             y:
@@ -528,11 +599,11 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
         <div
           className={`draw-world draw-world--${backgroundMode}`}
           style={{
-            width: WORLD_WIDTH,
-            height: WORLD_HEIGHT,
-            transform: `translate(${worldOffset.x + viewport.x}px, ${
-              worldOffset.y + viewport.y
-            }px) scale(${totalScale})`
+            backgroundPosition: `${viewport.x}px ${viewport.y}px`,
+            backgroundSize:
+              backgroundMode === "dots"
+                ? `${19 * totalScale}px ${19 * totalScale}px`
+                : `${26 * totalScale}px ${26 * totalScale}px`
           }}
         />
         <canvas ref={canvasRef} className="draw-canvas" />
@@ -540,9 +611,7 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
         <div
           className="draw-overlay-layer"
           style={{
-            transform: `translate(${worldOffset.x + viewport.x}px, ${
-              worldOffset.y + viewport.y
-            }px) scale(${totalScale})`
+            transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${totalScale})`
           }}
         >
           {comments.map((comment) => (

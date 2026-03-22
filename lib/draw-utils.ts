@@ -1,8 +1,11 @@
 import {
   type AiStroke,
   type AsciiBlock,
+  type CommentPin,
   type DrawingElement,
   type HumanStroke,
+  type PlannerAiContext,
+  type PlannerHumanContext,
   type Point,
   type ShapeElement
 } from "@/lib/draw-types";
@@ -13,8 +16,180 @@ export type Viewport = {
   scale: number;
 };
 
+export type Bounds = {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  width: number;
+  height: number;
+};
+
 export function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function finalizeBounds(
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number
+): Bounds {
+  return {
+    minX,
+    minY,
+    maxX,
+    maxY,
+    width: maxX - minX,
+    height: maxY - minY
+  };
+}
+
+export function getDrawingBounds(
+  elements: DrawingElement[],
+  comments: CommentPin[] = [],
+  currentStroke?: HumanStroke | null,
+  padding = 0,
+  minWidth = 0,
+  minHeight = 0
+): Bounds {
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  const includePoint = (x: number, y: number, radius = 0) => {
+    minX = Math.min(minX, x - radius);
+    minY = Math.min(minY, y - radius);
+    maxX = Math.max(maxX, x + radius);
+    maxY = Math.max(maxY, y + radius);
+  };
+
+  const includeStroke = (stroke: HumanStroke | AiStroke) => {
+    const radius = Math.max(2, stroke.size * 0.75);
+    for (const point of stroke.points) {
+      includePoint(point.x, point.y, radius);
+    }
+  };
+
+  const includeShape = (shape: ShapeElement) => {
+    includePoint(
+      shape.x,
+      shape.y,
+      Math.max(shape.width, shape.height) * 0.55 + (shape.strokeWidth ?? 2)
+    );
+  };
+
+  const includeAscii = (block: AsciiBlock) => {
+    const estimatedWidth = block.width ?? Math.max(block.fontSize * 2.4, block.text.length * block.fontSize * 0.56);
+    const estimatedHeight =
+      block.text.split("\n").length * block.fontSize * 0.95;
+    minX = Math.min(minX, block.x);
+    minY = Math.min(minY, block.y);
+    maxX = Math.max(maxX, block.x + estimatedWidth);
+    maxY = Math.max(maxY, block.y + estimatedHeight);
+  };
+
+  for (const element of elements) {
+    switch (element.kind) {
+      case "humanStroke":
+      case "aiStroke":
+        includeStroke(element);
+        break;
+      case "shape":
+        includeShape(element);
+        break;
+      case "asciiBlock":
+        includeAscii(element);
+        break;
+    }
+  }
+
+  if (currentStroke) {
+    includeStroke(currentStroke);
+  }
+
+  for (const comment of comments) {
+    includePoint(comment.x, comment.y, 20);
+  }
+
+  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+    const width = Math.max(1, minWidth);
+    const height = Math.max(1, minHeight);
+    return finalizeBounds(0, 0, width, height);
+  }
+
+  minX -= padding;
+  minY -= padding;
+  maxX += padding;
+  maxY += padding;
+
+  let width = maxX - minX;
+  let height = maxY - minY;
+  const centerX = minX + width * 0.5;
+  const centerY = minY + height * 0.5;
+
+  width = Math.max(width, minWidth);
+  height = Math.max(height, minHeight);
+
+  return finalizeBounds(
+    centerX - width * 0.5,
+    centerY - height * 0.5,
+    centerX + width * 0.5,
+    centerY + height * 0.5
+  );
+}
+
+export function translateHumanContext(
+  context: PlannerHumanContext[],
+  offsetX: number,
+  offsetY: number
+) {
+  return context.map((entry) => {
+    if (entry.kind === "humanStroke") {
+      return {
+        ...entry,
+        points: entry.points.map(([x, y]) => [Math.round(x - offsetX), Math.round(y - offsetY)] as [number, number])
+      };
+    }
+
+    if (entry.kind === "asciiBlock") {
+      return {
+        ...entry,
+        x: Math.round(entry.x - offsetX),
+        y: Math.round(entry.y - offsetY)
+      };
+    }
+
+    return {
+      ...entry,
+      x: Math.round(entry.x - offsetX),
+      y: Math.round(entry.y - offsetY)
+    };
+  });
+}
+
+export function translateAiContext(
+  context: PlannerAiContext[],
+  offsetX: number,
+  offsetY: number
+) {
+  return context.map((entry) => ({
+    ...entry,
+    points: entry.points.map(([x, y]) => [Math.round(x - offsetX), Math.round(y - offsetY)] as [number, number])
+  }));
+}
+
+export function translateComments(
+  comments: CommentPin[],
+  offsetX: number,
+  offsetY: number
+) {
+  return comments.map((comment) => ({
+    ...comment,
+    x: Math.round(comment.x - offsetX),
+    y: Math.round(comment.y - offsetY)
+  }));
 }
 
 export function distance(a: Point, b: Point) {

@@ -16,7 +16,10 @@ import {
 import {
   getCanvasHumanContext,
   getRecentAiContext,
-  parseNdjsonStream
+  parseNdjsonStream,
+  translateAiContext,
+  translateComments,
+  translateHumanContext
 } from "@/lib/draw-utils";
 
 const hasClerk = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
@@ -102,6 +105,47 @@ export function DrawApp() {
     turnState === "awaitingModel" ||
     turnState === "modelStreaming" ||
     turnState === "modelAnimating";
+
+  const translateSnapshotEvent = (
+    event: DrawStreamEvent,
+    originX: number,
+    originY: number
+  ): DrawStreamEvent => {
+    switch (event.type) {
+      case "stroke":
+        return {
+          ...event,
+          stroke: {
+            ...event.stroke,
+            points: event.stroke.points.map((point) => ({
+              ...point,
+              x: point.x + originX,
+              y: point.y + originY
+            }))
+          }
+        };
+      case "shape":
+        return {
+          ...event,
+          shape: {
+            ...event.shape,
+            x: event.shape.x + originX,
+            y: event.shape.y + originY
+          }
+        };
+      case "ascii_block":
+        return {
+          ...event,
+          block: {
+            ...event.block,
+            x: event.block.x + originX,
+            y: event.block.y + originY
+          }
+        };
+      default:
+        return event;
+    }
+  };
 
   const queueAnimation = (event: DrawStreamEvent) => {
     animationChainRef.current = animationChainRef.current.then(async () => {
@@ -198,7 +242,10 @@ export function DrawApp() {
     });
   };
 
-  const handleResponse = async (response: Response) => {
+  const handleResponse = async (
+    response: Response,
+    snapshotOrigin: { x: number; y: number }
+  ) => {
     if (!response.ok || !response.body) {
       const payload = (await response.json().catch(() => null)) as
         | { error?: string; usage?: { used: number; limit: number } }
@@ -214,26 +261,32 @@ export function DrawApp() {
 
     setTurnState("modelStreaming");
     await parseNdjsonStream<DrawStreamEvent>(response.body, async (event) => {
-      switch (event.type) {
+      const translatedEvent = translateSnapshotEvent(
+        event,
+        snapshotOrigin.x,
+        snapshotOrigin.y
+      );
+
+      switch (translatedEvent.type) {
         case "thinking":
-          setThinkingText(event.text);
+          setThinkingText(translatedEvent.text);
           break;
         case "say":
-          setNarration(event.text);
+          setNarration(translatedEvent.text);
           break;
         case "stroke":
         case "shape":
         case "ascii_block":
         case "comment_reply":
         case "set_palette":
-          queueAnimation(event);
+          queueAnimation(translatedEvent);
           break;
         case "done":
-          finalizeTurn(event.summary, event.usage);
+          finalizeTurn(translatedEvent.summary, translatedEvent.usage);
           break;
         case "error":
           setTurnState("idle");
-          setErrorMessage(event.message);
+          setErrorMessage(translatedEvent.message);
           break;
       }
     });
@@ -284,9 +337,21 @@ export function DrawApp() {
             palette,
             aiTemperature,
             aiMaxOutputTokens,
-            humanDelta: getCanvasHumanContext(elements, 24),
-            aiDelta: getRecentAiContext(elements, 4),
-            comments,
+            humanDelta: translateHumanContext(
+              getCanvasHumanContext(elements, 24),
+              metrics.originX,
+              metrics.originY
+            ),
+            aiDelta: translateAiContext(
+              getRecentAiContext(elements, 4),
+              metrics.originX,
+              metrics.originY
+            ),
+            comments: translateComments(
+              comments,
+              metrics.originX,
+              metrics.originY
+            ),
             turnHistory: turnHistory.slice(-8),
             mode: targetCommentId ? "comment" : "turn",
             targetCommentId
@@ -295,7 +360,10 @@ export function DrawApp() {
         }
       );
 
-      await handleResponse(response);
+      await handleResponse(response, {
+        x: metrics.originX,
+        y: metrics.originY
+      });
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
         setAiSummary("Stopped the turn.");
