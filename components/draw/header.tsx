@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
   ChevronLeft,
@@ -44,6 +44,9 @@ export function Header({
   onBack
 }: HeaderProps) {
   const [fallbackIndex, setFallbackIndex] = useState(0);
+  const [isMessageExpanded, setIsMessageExpanded] = useState(false);
+  const messageShellRef = useRef<HTMLDivElement | null>(null);
+  const messageRef = useRef<HTMLSpanElement | null>(null);
 
   useEffect(() => {
     if (turnState === "awaitingModel") {
@@ -81,6 +84,36 @@ export function Header({
   const isLoading =
     turnState === "awaitingModel" || turnState === "modelStreaming";
 
+  useEffect(() => {
+    setIsMessageExpanded(false);
+
+    let timeoutId: number | null = null;
+    const frameId = window.requestAnimationFrame(() => {
+      const shell = messageShellRef.current;
+      const text = messageRef.current;
+      if (!shell || !text) {
+        return;
+      }
+
+      const isOverflowing = text.scrollWidth > shell.clientWidth + 4;
+      if (!isOverflowing) {
+        return;
+      }
+
+      setIsMessageExpanded(true);
+      timeoutId = window.setTimeout(() => {
+        setIsMessageExpanded(false);
+      }, 3600);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [message]);
+
   const handleDownload = () => {
     const canvas = document.querySelector("canvas");
     if (!(canvas instanceof HTMLCanvasElement)) {
@@ -114,7 +147,10 @@ export function Header({
         </div>
 
         <div className="draw-app-header__center">
-          <div className="draw-app-header__pill">
+          <div
+            className={`draw-app-header__pill${isMessageExpanded ? " is-expanded" : ""}`}
+            title={message}
+          >
             <div className="draw-app-header__status-icon">
               {isLoading ? (
                 <Loader2
@@ -126,9 +162,13 @@ export function Header({
               )}
             </div>
 
-            <div className="draw-app-header__message-shell">
+            <div
+              ref={messageShellRef}
+              className="draw-app-header__message-shell"
+            >
               <AnimatePresence mode="wait" initial={false}>
                 <motion.span
+                  ref={messageRef}
                   key={message}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}

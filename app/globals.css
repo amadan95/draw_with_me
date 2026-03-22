@@ -153,11 +153,23 @@ a {
   background: rgba(255, 255, 255, 0.68);
   backdrop-filter: blur(14px);
   box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
-  transition: background-color 160ms ease;
+  transition:
+    background-color 160ms ease,
+    box-shadow 220ms ease,
+    border-radius 220ms ease,
+    max-width 220ms ease;
 }
 
 .draw-app-header__pill:hover {
   background: rgba(255, 255, 255, 0.82);
+}
+
+.draw-app-header__pill.is-expanded,
+.draw-app-header__pill:hover,
+.draw-app-header__pill:focus-within {
+  max-width: min(54rem, calc(100vw - 120px));
+  border-radius: 28px;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.1);
 }
 
 .draw-app-header__button {
@@ -220,6 +232,14 @@ a {
   justify-content: center;
 }
 
+.draw-app-header__pill.is-expanded .draw-app-header__message-shell,
+.draw-app-header__pill:hover .draw-app-header__message-shell,
+.draw-app-header__pill:focus-within .draw-app-header__message-shell {
+  height: auto;
+  overflow: visible;
+  justify-content: flex-start;
+}
+
 .draw-app-header__message {
   display: block;
   max-width: 100%;
@@ -231,6 +251,16 @@ a {
   line-height: 1;
   font-weight: 500;
   color: rgba(38, 37, 35, 0.62);
+}
+
+.draw-app-header__pill.is-expanded .draw-app-header__message,
+.draw-app-header__pill:hover .draw-app-header__message,
+.draw-app-header__pill:focus-within .draw-app-header__message {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  text-align: left;
+  line-height: 1.35;
 }
 
 @keyframes draw-header-spin {
@@ -258,6 +288,12 @@ a {
     width: 100%;
     padding: 8px 14px;
     gap: 10px;
+  }
+
+  .draw-app-header__pill.is-expanded,
+  .draw-app-header__pill:hover,
+  .draw-app-header__pill:focus-within {
+    max-width: calc(100vw - 28px);
   }
 }
 
