@@ -617,11 +617,11 @@ a {
   left: 50%;
   bottom: 26px;
   z-index: 13;
-  width: min(920px, calc(100vw - 28px));
+  width: min(780px, calc(100vw - 28px));
   transform: translateX(-50%) scale(var(--draw-dock-scale));
   transform-origin: center bottom;
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 
 .draw-dock-top,
@@ -638,18 +638,18 @@ a {
     0 6px 18px rgba(38, 37, 35, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(26px);
-  min-height: 84px;
-  padding: 12px 18px;
+  min-height: 78px;
+  padding: 10px 16px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   justify-content: center;
 }
 
 .draw-tool-cluster {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
 }
 
 .draw-dock-tool,
@@ -722,7 +722,7 @@ a {
 
 .draw-dock-divider {
   width: 1px;
-  height: 44px;
+  height: 38px;
   background: linear-gradient(180deg, rgba(152, 145, 134, 0.12), rgba(152, 145, 134, 0.24));
 }
 
@@ -796,7 +796,7 @@ a {
 .draw-palette {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
 }
 
 .draw-palette--dock {
@@ -835,7 +835,7 @@ a {
 .draw-size-picker {
   display: inline-flex;
   align-items: center;
-  gap: 18px;
+  gap: 14px;
   padding: 0;
   border-radius: 14px;
   background: transparent;
@@ -868,7 +868,7 @@ a {
 }
 
 .draw-dock-bottom {
-  min-height: 110px;
+  min-height: 98px;
   padding: 0;
   display: block;
   background: none;
@@ -880,19 +880,19 @@ a {
 .draw-send-button {
   width: 100%;
   min-width: 0;
-  height: 110px;
+  height: 98px;
   border: 1px solid rgba(38, 37, 35, 0.08);
-  border-radius: 34px;
+  border-radius: 32px;
   background:
     radial-gradient(circle at 12% 50%, rgba(217, 201, 255, 0.7), transparent 32%),
     radial-gradient(circle at 86% 42%, rgba(255, 226, 178, 0.68), transparent 34%),
     linear-gradient(90deg, rgba(246, 236, 255, 0.96), rgba(255, 245, 234, 0.96));
   color: rgba(62, 72, 92, 0.96);
-  padding: 0 26px;
+  padding: 0 22px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 16px;
+  gap: 10px;
   font-size: 18px;
   box-shadow:
     0 26px 58px rgba(176, 160, 146, 0.18),
@@ -915,19 +915,25 @@ a {
 }
 
 .draw-send-button strong {
-  font-size: clamp(1.55rem, 3vw, 2.2rem);
+  font-size: clamp(1.45rem, 2.8vw, 2.05rem);
   font-weight: 600;
   letter-spacing: -0.03em;
 }
 
 .draw-send-button__icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 14px;
+  width: 38px;
+  height: 38px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #ffc56f;
+  flex: 0 0 auto;
+}
+
+.draw-send-button__twinkle {
+  width: 36px;
+  height: 36px;
+  display: block;
+  transform: translateY(1px);
 }
 
 .draw-settings-popover {

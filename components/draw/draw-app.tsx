@@ -1,11 +1,11 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import { Sparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AuthControls } from "@/components/draw/auth-controls";
 import { DrawCanvas, type DrawCanvasHandle } from "@/components/draw/draw-canvas";
 import { Header } from "@/components/draw/header";
+import { TwinkleClusterIcon } from "@/components/draw/twinkle-cluster-icon";
 import { useDrawStore } from "@/lib/draw-store";
 import {
   type DrawStreamEvent,
@@ -622,7 +622,7 @@ export function DrawApp() {
                 aria-keyshortcuts="Space"
               >
                 <span className="draw-send-button__icon" aria-hidden="true">
-                  <Sparkles size={20} strokeWidth={2.2} />
+                  <TwinkleClusterIcon className="draw-send-button__twinkle" />
                 </span>
                 <strong>{isLoading ? "Thinking..." : "Send to Gemini"}</strong>
               </button>
