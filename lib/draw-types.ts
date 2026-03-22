@@ -8,7 +8,27 @@ export const paletteSets = [
   ["#262523", "#5f0f40", "#9a031e", "#fb8b24", "#e36414"]
 ] as const;
 
+export const semanticGridColumns = [
+  "A",
+  "B",
+  "C",
+  "D",
+  "E",
+  "F",
+  "G",
+  "H",
+  "I",
+  "J",
+  "K",
+  "L"
+] as const;
+
+export const semanticGridRows = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
+
 export type Palette = (typeof paletteSets)[number];
+export type SemanticGridColumn = (typeof semanticGridColumns)[number];
+export type SemanticGridRow = (typeof semanticGridRows)[number];
+export type SemanticGridCell = [SemanticGridColumn, SemanticGridRow];
 export type ToolMode = "draw" | "erase" | "ascii" | "comment";
 export type CanvasBackground = "dots" | "grid";
 export type TurnState =
@@ -44,6 +64,11 @@ export type ObjectBoundingBox = {
   height: number;
 };
 
+export type SvgViewBox = {
+  width: number;
+  height: number;
+};
+
 export type ObjectFamily = string;
 export type OrientationHint =
   | "horizontal"
@@ -54,46 +79,22 @@ export type OrientationHint =
   | "floating"
   | "upright";
 
-export type PlacementHint = {
-  xRatio?: number;
-  yRatio?: number;
-  biasX?: number;
-  biasY?: number;
-};
-
-export type ScaleHint = {
-  widthRatio?: number;
-  heightRatio?: number;
-};
-
-export type PlacementRelation =
-  | "attach_roof_left"
-  | "attach_roof_center"
-  | "attach_roof_right"
-  | "ground_front"
-  | "ground_left"
-  | "ground_right"
-  | "sky_above"
-  | "sky_above_left"
-  | "sky_above_right"
-  | "beside_left"
-  | "beside_right"
-  | "around_subject";
+export type SizeHint = "small" | "medium" | "large";
 
 export type SceneSubject = {
   id: string;
   family: ObjectFamily;
   label: string;
+  occupiedGridCells: SemanticGridCell[];
   bbox: ObjectBoundingBox;
 };
 
 export type SceneAddition = {
   id: string;
   family: ObjectFamily;
+  gridCells: SemanticGridCell[];
   targetSubjectId?: string;
-  relation: PlacementRelation;
-  placementHint?: PlacementHint;
-  scaleHint?: ScaleHint;
+  sizeHint?: SizeHint;
   orientationHint?: OrientationHint;
   reason: string;
   priority: number;
@@ -126,7 +127,9 @@ export type PlannedStrokeEvent = {
   color: string;
   width: number;
   opacity?: number;
-  points: [number, number][];
+  svgPath: string;
+  gridCells: SemanticGridCell[];
+  viewBox?: SvgViewBox;
   timing?: StrokeTiming;
   label?: string;
   objectLabel?: string;
@@ -136,10 +139,7 @@ export type PlannedShapeEvent = {
   type: "shape";
   shape: ShapeKind;
   color: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+  gridCells: SemanticGridCell[];
   rotation?: number;
   fill?: string;
   strokeWidth?: number;
@@ -148,11 +148,9 @@ export type PlannedShapeEvent = {
 export type PlannedAsciiBlockEvent = {
   type: "ascii_block";
   color: string;
-  x: number;
-  y: number;
+  gridCells: SemanticGridCell[];
   text: string;
   fontSize: number;
-  width?: number;
 };
 
 export type PlannedSayEvent = {
@@ -311,6 +309,26 @@ export const pointSchema = z.object({
   pressure: z.number().finite().optional()
 });
 
+export const semanticGridColumnSchema = z.enum(semanticGridColumns);
+export const semanticGridRowSchema = z.union([
+  z.literal(1),
+  z.literal(2),
+  z.literal(3),
+  z.literal(4),
+  z.literal(5),
+  z.literal(6),
+  z.literal(7),
+  z.literal(8),
+  z.literal(9),
+  z.literal(10),
+  z.literal(11),
+  z.literal(12)
+]);
+export const semanticGridCellSchema = z.tuple([
+  semanticGridColumnSchema,
+  semanticGridRowSchema
+]);
+export const semanticGridCellsSchema = z.array(semanticGridCellSchema).min(1).max(16);
 export const objectFamilySchema = z.string().min(1).max(80);
 export const orientationHintSchema = z.enum([
   "horizontal",
@@ -321,33 +339,7 @@ export const orientationHintSchema = z.enum([
   "floating",
   "upright"
 ]);
-
-export const placementHintSchema = z.object({
-  xRatio: z.number().min(0).max(1).optional(),
-  yRatio: z.number().min(0).max(1).optional(),
-  biasX: z.number().min(-1).max(1).optional(),
-  biasY: z.number().min(-1).max(1).optional()
-});
-
-export const scaleHintSchema = z.object({
-  widthRatio: z.number().min(0.05).max(1.25).optional(),
-  heightRatio: z.number().min(0.05).max(1.25).optional()
-});
-
-export const placementRelationSchema = z.enum([
-  "attach_roof_left",
-  "attach_roof_center",
-  "attach_roof_right",
-  "ground_front",
-  "ground_left",
-  "ground_right",
-  "sky_above",
-  "sky_above_left",
-  "sky_above_right",
-  "beside_left",
-  "beside_right",
-  "around_subject"
-]);
+export const sizeHintSchema = z.enum(["small", "medium", "large"]);
 
 export const objectBoundingBoxSchema = z.object({
   x: z.number().finite(),
@@ -356,20 +348,25 @@ export const objectBoundingBoxSchema = z.object({
   height: z.number().positive()
 });
 
+export const svgViewBoxSchema = z.object({
+  width: z.number().positive(),
+  height: z.number().positive()
+});
+
 export const sceneSubjectSchema = z.object({
   id: z.string(),
   family: objectFamilySchema,
   label: z.string().min(1).max(80),
+  occupiedGridCells: z.array(semanticGridCellSchema).min(1).max(48),
   bbox: objectBoundingBoxSchema
 });
 
 export const sceneAdditionSchema = z.object({
   id: z.string(),
   family: objectFamilySchema,
+  gridCells: semanticGridCellsSchema,
   targetSubjectId: z.string().optional(),
-  relation: placementRelationSchema,
-  placementHint: placementHintSchema.optional(),
-  scaleHint: scaleHintSchema.optional(),
+  sizeHint: sizeHintSchema.optional(),
   orientationHint: orientationHintSchema.optional(),
   reason: z.string().min(1).max(160),
   priority: z.number().int().min(1).max(9)
@@ -387,7 +384,7 @@ export const compiledObjectActionSchema = z.object({
   color: z.string(),
   width: z.number().positive().max(24),
   opacity: z.number().min(0.05).max(1),
-  points: z.array(z.tuple([z.number().finite(), z.number().finite()])).min(2).max(20),
+  points: z.array(z.tuple([z.number().finite(), z.number().finite()])).min(2).max(320),
   timing: z
     .object({
       speed: z.number().min(0.2).max(3).optional(),
@@ -401,7 +398,9 @@ export const plannedStrokeEventSchema = z.object({
   color: z.string(),
   width: z.number().positive().max(24),
   opacity: z.number().min(0.05).max(1).optional(),
-  points: z.array(z.tuple([z.number().finite(), z.number().finite()])).min(2).max(80),
+  svgPath: z.string().min(1).max(4000),
+  gridCells: semanticGridCellsSchema,
+  viewBox: svgViewBoxSchema.optional(),
   timing: z
     .object({
       speed: z.number().min(0.2).max(3).optional(),
@@ -416,10 +415,7 @@ export const plannedShapeEventSchema = z.object({
   type: z.literal("shape"),
   shape: z.enum(["rect", "circle", "line", "arrow", "scribble", "triangle", "trapezoid"]),
   color: z.string(),
-  x: z.number().finite(),
-  y: z.number().finite(),
-  width: z.number().finite(),
-  height: z.number().finite(),
+  gridCells: semanticGridCellsSchema,
   rotation: z.number().finite().optional(),
   fill: z.string().optional(),
   strokeWidth: z.number().positive().max(24).optional()
@@ -428,11 +424,9 @@ export const plannedShapeEventSchema = z.object({
 export const plannedAsciiBlockEventSchema = z.object({
   type: z.literal("ascii_block"),
   color: z.string(),
-  x: z.number().finite(),
-  y: z.number().finite(),
+  gridCells: semanticGridCellsSchema,
   text: z.string().min(1).max(240),
-  fontSize: z.number().positive().max(96),
-  width: z.number().finite().positive().optional()
+  fontSize: z.number().positive().max(96)
 });
 
 export const plannedSayEventSchema = z.object({

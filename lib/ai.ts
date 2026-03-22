@@ -6,30 +6,40 @@ import {
   objectBoundingBoxSchema,
   objectFamilySchema,
   orientationHintSchema,
-  placementRelationSchema,
-  placementHintSchema,
   plannedDrawEventSchema,
-  scaleHintSchema,
   sceneAdditionSchema,
   sceneAnalysisSchema,
   sceneSubjectSchema,
+  semanticGridCellSchema,
+  semanticGridCellsSchema,
+  sizeHintSchema,
+  svgViewBoxSchema,
+  type GeminiDrawPlan,
   type ObjectBoundingBox,
   type ObjectFamily,
-  type GeminiDrawPlan,
   type OrientationHint,
-  type PlacementRelation,
-  type PlacementHint,
   type PlannedDrawEvent,
-  type ScaleHint,
   type SceneAddition,
   type SceneAnalysis,
-  type SceneSubject
+  type SceneSubject,
+  type SemanticGridCell,
+  type SizeHint,
+  type SvgViewBox
 } from "@/lib/draw-types";
+import {
+  calculateUnitScale,
+  dedupeGridCells,
+  getHumanContextBoundingBox,
+  gridCellsToBounds,
+  mapBoundsToGridCells,
+  pointToGridCell,
+  semanticGridCellLabel,
+  summarizeHumanContextGrid
+} from "@/lib/scene-anchors";
+import { getPointBounds, svgPathToFramePoints } from "@/lib/svg-path";
 
 type DrawRequest = z.infer<typeof drawRequestSchema>;
 type JsonObject = Record<string, unknown>;
-
-const relationValues = placementRelationSchema.options;
 
 class GeminiRequestError extends Error {
   status: number;
@@ -80,6 +90,125 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function extractRoot(value: unknown): unknown {
+  if (!isJsonObject(value)) {
+    return value;
+  }
+
+  if ("analysis" in value) {
+    return extractRoot(value.analysis);
+  }
+  if ("result" in value) {
+    return extractRoot(value.result);
+  }
+  if ("response" in value) {
+    return extractRoot(value.response);
+  }
+  if ("data" in value) {
+    return extractRoot(value.data);
+  }
+  if ("plan" in value) {
+    return extractRoot(value.plan);
+  }
+  if ("turn" in value) {
+    return extractRoot(value.turn);
+  }
+
+  return value;
+}
+
+function extractJsonStringField(rawText: string, field: string) {
+  const match = rawText.match(
+    new RegExp(`"${field}"\\s*:\\s*("(?:\\\\.|[^"\\\\])*")`)
+  );
+  if (!match?.[1]) {
+    return undefined;
+  }
+
+  try {
+    const value = JSON.parse(match[1]);
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function extractJsonArrayField(rawText: string, field: string) {
+  const fieldIndex = rawText.indexOf(`"${field}"`);
+  if (fieldIndex < 0) {
+    return undefined;
+  }
+
+  const bracketIndex = rawText.indexOf("[", fieldIndex);
+  if (bracketIndex < 0) {
+    return undefined;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = bracketIndex; index < rawText.length; index += 1) {
+    const char = rawText[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (char === "[") {
+      depth += 1;
+      continue;
+    }
+
+    if (char === "]") {
+      depth -= 1;
+      if (depth === 0) {
+        return rawText.slice(bracketIndex, index + 1);
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function clampFiniteNumber(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function sanitizeShortText(value: unknown, maxLength: number) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value.trim().replace(/\s+/g, " ");
+  return normalized ? normalized.slice(0, maxLength) : undefined;
+}
+
+function includesAny(text: string | undefined, needles: string[]) {
+  if (!text) {
+    return false;
+  }
+
+  const haystack = text.toLowerCase();
+  return needles.some((needle) => haystack.includes(needle));
+}
+
 function getRequestedTemperature(input: DrawRequest, fallback: number) {
   return clamp(
     typeof input.aiTemperature === "number" ? input.aiTemperature : fallback,
@@ -104,71 +233,6 @@ function getRequestedMaxOutputTokens(
   );
 }
 
-function clampFiniteNumber(value: unknown, fallback: number) {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
-function includesAny(text: string | undefined, needles: string[]) {
-  if (!text) {
-    return false;
-  }
-
-  const haystack = text.toLowerCase();
-  return needles.some((needle) => haystack.includes(needle));
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function extractRoot(value: unknown): unknown {
-  if (!isJsonObject(value)) {
-    return value;
-  }
-
-  if ("analysis" in value) {
-    return extractRoot(value.analysis);
-  }
-
-  if ("result" in value) {
-    return extractRoot(value.result);
-  }
-
-  if ("response" in value) {
-    return extractRoot(value.response);
-  }
-
-  if ("data" in value) {
-    return extractRoot(value.data);
-  }
-
-  if ("plan" in value) {
-    return extractRoot(value.plan);
-  }
-
-  if ("turn" in value) {
-    return extractRoot(value.turn);
-  }
-
-  return value;
-}
-
-function extractJsonStringField(rawText: string, field: string) {
-  const match = rawText.match(
-    new RegExp(`"${field}"\\s*:\\s*("(?:\\\\.|[^"\\\\])*")`)
-  );
-  if (!match?.[1]) {
-    return undefined;
-  }
-
-  try {
-    const value = JSON.parse(match[1]);
-    return typeof value === "string" && value.trim() ? value.trim() : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 function normalizeFamily(
   value: unknown,
   fallbackText = "",
@@ -185,471 +249,7 @@ function normalizeFamily(
     return objectFamilySchema.parse(fallback.slice(0, 80));
   }
 
-  if (mode === "addition") {
-    return "detail";
-  }
-
-  return null;
-}
-
-function extractHumanBounds(input: DrawRequest) {
-  let minX = Number.POSITIVE_INFINITY;
-  let minY = Number.POSITIVE_INFINITY;
-  let maxX = Number.NEGATIVE_INFINITY;
-  let maxY = Number.NEGATIVE_INFINITY;
-
-  const pushPoint = (x: number, y: number) => {
-    minX = Math.min(minX, x);
-    minY = Math.min(minY, y);
-    maxX = Math.max(maxX, x);
-    maxY = Math.max(maxY, y);
-  };
-
-  for (const item of input.humanDelta) {
-    if (item.kind === "humanStroke") {
-      if (item.tool === "erase") {
-        continue;
-      }
-      for (const [x, y] of item.points) {
-        pushPoint(x, y);
-      }
-      continue;
-    }
-
-    if (item.kind === "asciiBlock") {
-      pushPoint(item.x, item.y);
-      continue;
-    }
-
-    pushPoint(item.x - item.width * 0.5, item.y - item.height * 0.5);
-    pushPoint(item.x + item.width * 0.5, item.y + item.height * 0.5);
-  }
-
-  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
-    const width = input.canvasWidth * 0.42;
-    const height = input.canvasHeight * 0.34;
-    return {
-      minX: input.canvasWidth * 0.5 - width * 0.5,
-      minY: input.canvasHeight * 0.5 - height * 0.55,
-      maxX: input.canvasWidth * 0.5 + width * 0.5,
-      maxY: input.canvasHeight * 0.5 + height * 0.45,
-      width,
-      height
-    };
-  }
-
-  return {
-    minX,
-    minY,
-    maxX,
-    maxY,
-    width: Math.max(1, maxX - minX),
-    height: Math.max(1, maxY - minY)
-  };
-}
-
-function normalizeBoundingBox(
-  value: unknown,
-  input: DrawRequest,
-  fallback: ObjectBoundingBox
-): ObjectBoundingBox {
-  if (!isJsonObject(value)) {
-    return objectBoundingBoxSchema.parse(fallback);
-  }
-
-  const width = clamp(clampFiniteNumber(value.width, fallback.width), 20, input.canvasWidth * 0.9);
-  const height = clamp(clampFiniteNumber(value.height, fallback.height), 20, input.canvasHeight * 0.9);
-  const x = clamp(clampFiniteNumber(value.x, fallback.x), 0, Math.max(0, input.canvasWidth - width));
-  const y = clamp(clampFiniteNumber(value.y, fallback.y), 0, Math.max(0, input.canvasHeight - height));
-
-  return objectBoundingBoxSchema.parse({
-    x: Math.round(x),
-    y: Math.round(y),
-    width: Math.round(width),
-    height: Math.round(height)
-  });
-}
-
-function preferredTargetFamilies(family: ObjectFamily): ObjectFamily[] {
-  if (includesAny(family, ["chimney", "flue", "stack"])) {
-    return ["house"];
-  }
-  if (includesAny(family, ["path", "walkway", "trail", "road", "sidewalk"])) {
-    return ["house"];
-  }
-  if (includesAny(family, ["smoke", "steam", "plume"])) {
-    return ["chimney", "house"];
-  }
-  if (includesAny(family, ["flag", "shutter", "porch light", "window box", "antenna"])) {
-    return ["house"];
-  }
-  if (includesAny(family, ["grass", "bush", "flower", "fence", "hedge", "shrub"])) {
-    return ["house", "tree", "hill"];
-  }
-  if (includesAny(family, ["mailbox", "bench", "lamp", "garden", "pond", "vehicle"])) {
-    return ["house", "tree", "hill"];
-  }
-  if (includesAny(family, ["tree"])) {
-    return ["house", "hill"];
-  }
-  if (includesAny(family, ["animal", "cat", "dog", "birdhouse"])) {
-    return ["house", "tree"];
-  }
-  if (includesAny(family, ["tool", "shovel", "watering can", "rake"])) {
-    return ["house", "garden", "tree"];
-  }
-
-  return [];
-}
-
-function matchesSubjectFamily(subject: SceneSubject, preferred: string) {
-  return (
-    includesAny(subject.family, [preferred]) ||
-    includesAny(subject.label, [preferred]) ||
-    includesAny(preferred, [subject.family])
-  );
-}
-
-function inferRelation(
-  family: ObjectFamily,
-  raw: unknown,
-  target: SceneSubject | null
-): PlacementRelation {
-  if (typeof raw === "string" && relationValues.includes(raw as PlacementRelation)) {
-    return raw as PlacementRelation;
-  }
-
-  if (includesAny(family, ["chimney", "antenna", "flag", "satellite"])) {
-    return "attach_roof_right";
-  }
-  if (includesAny(family, ["porch light", "shutter", "window box"])) {
-    return "around_subject";
-  }
-  if (includesAny(family, ["smoke", "cloud", "bird", "kite"])) {
-    return target ? "sky_above" : "sky_above_right";
-  }
-  if (includesAny(family, ["sun", "balloon"])) {
-    return "sky_above_right";
-  }
-  if (includesAny(family, ["moon", "star"])) {
-    return "sky_above_left";
-  }
-  if (includesAny(family, ["grass", "fence", "path", "water", "hill", "pond", "river"])) {
-    return "ground_front";
-  }
-  if (includesAny(family, ["bush", "flower", "shrub", "hedge", "garden"])) {
-    return target ? "ground_right" : "ground_front";
-  }
-  if (includesAny(family, ["tree", "house", "mailbox", "bench", "lamp", "sign"])) {
-    return "beside_right";
-  }
-
-  return "around_subject";
-}
-
-function normalizePlacementHint(value: unknown): PlacementHint | undefined {
-  if (!isJsonObject(value)) {
-    return undefined;
-  }
-
-  const normalized: PlacementHint = {
-    xRatio:
-      typeof value.xRatio === "number" && Number.isFinite(value.xRatio)
-        ? clamp(value.xRatio, 0, 1)
-        : undefined,
-    yRatio:
-      typeof value.yRatio === "number" && Number.isFinite(value.yRatio)
-        ? clamp(value.yRatio, 0, 1)
-        : undefined,
-    biasX:
-      typeof value.biasX === "number" && Number.isFinite(value.biasX)
-        ? clamp(value.biasX, -1, 1)
-        : undefined,
-    biasY:
-      typeof value.biasY === "number" && Number.isFinite(value.biasY)
-        ? clamp(value.biasY, -1, 1)
-        : undefined
-  };
-
-  if (
-    normalized.xRatio === undefined &&
-    normalized.yRatio === undefined &&
-    normalized.biasX === undefined &&
-    normalized.biasY === undefined
-  ) {
-    return undefined;
-  }
-
-  return placementHintSchema.parse(normalized);
-}
-
-function normalizeScaleHint(value: unknown): ScaleHint | undefined {
-  if (!isJsonObject(value)) {
-    return undefined;
-  }
-
-  const normalized: ScaleHint = {
-    widthRatio:
-      typeof value.widthRatio === "number" && Number.isFinite(value.widthRatio)
-        ? clamp(value.widthRatio, 0.05, 1.25)
-        : undefined,
-    heightRatio:
-      typeof value.heightRatio === "number" && Number.isFinite(value.heightRatio)
-        ? clamp(value.heightRatio, 0.05, 1.25)
-        : undefined
-  };
-
-  if (normalized.widthRatio === undefined && normalized.heightRatio === undefined) {
-    return undefined;
-  }
-
-  return scaleHintSchema.parse(normalized);
-}
-
-function normalizeOrientationHint(value: unknown): OrientationHint | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  const normalized = value.trim().toLowerCase().replace(/\s+/g, "_");
-  const allowed = orientationHintSchema.options;
-  return allowed.includes(normalized as OrientationHint)
-    ? orientationHintSchema.parse(normalized)
-    : undefined;
-}
-
-function normalizeSubject(
-  value: unknown,
-  input: DrawRequest,
-  index: number
-): SceneSubject | null {
-  if (!isJsonObject(value)) {
-    return null;
-  }
-
-  const family = normalizeFamily(
-    value.family ?? value.label ?? value.type ?? value.name,
-    `${value.label ?? ""}`,
-    "subject"
-  );
-  if (!family) {
-    return null;
-  }
-
-  const humanBounds = extractHumanBounds(input);
-  const fallbackWidth = clamp(humanBounds.width * 0.36, 60, input.canvasWidth * 0.5);
-  const fallbackHeight = clamp(humanBounds.height * 0.34, 60, input.canvasHeight * 0.5);
-  const fallbackX = clamp(
-    humanBounds.minX + humanBounds.width * 0.5 - fallbackWidth * 0.5,
-    0,
-    Math.max(0, input.canvasWidth - fallbackWidth)
-  );
-  const fallbackY = clamp(
-    humanBounds.minY + humanBounds.height * 0.5 - fallbackHeight * 0.5,
-    0,
-    Math.max(0, input.canvasHeight - fallbackHeight)
-  );
-
-  return sceneSubjectSchema.parse({
-    id:
-      typeof value.id === "string" && value.id.trim()
-        ? value.id.trim().slice(0, 64)
-        : createId(`subject-${index + 1}`),
-    family,
-    label:
-      typeof value.label === "string" && value.label.trim()
-        ? value.label.trim().slice(0, 80)
-        : family,
-    bbox: normalizeBoundingBox(value.bbox, input, {
-      x: fallbackX,
-      y: fallbackY,
-      width: fallbackWidth,
-      height: fallbackHeight
-    })
-  });
-}
-
-function normalizeAddition(
-  value: unknown,
-  subjects: SceneSubject[],
-  index: number
-): SceneAddition | null {
-  if (!isJsonObject(value)) {
-    return null;
-  }
-
-  const family = normalizeFamily(
-    value.family ?? value.label ?? value.type ?? value.name,
-    `${value.reason ?? ""}`,
-    "addition"
-  );
-  if (!family) {
-    return null;
-  }
-
-  let targetSubject =
-    typeof value.targetSubjectId === "string"
-      ? subjects.find((subject) => subject.id === value.targetSubjectId) ?? null
-      : null;
-
-  if (!targetSubject) {
-    const preferred = preferredTargetFamilies(family);
-    for (const preferredFamily of preferred) {
-      const match = subjects.find((subject) => matchesSubjectFamily(subject, preferredFamily));
-      if (match) {
-        targetSubject = match;
-        break;
-      }
-    }
-  }
-
-  const reason =
-    typeof value.reason === "string" && value.reason.trim()
-      ? value.reason.trim().slice(0, 160)
-      : `adds ${family} to the scene`;
-
-  return sceneAdditionSchema.parse({
-    id:
-      typeof value.id === "string" && value.id.trim()
-        ? value.id.trim().slice(0, 64)
-        : createId(`addition-${index + 1}`),
-    family,
-    targetSubjectId: targetSubject?.id,
-    relation: inferRelation(family, value.relation, targetSubject),
-    placementHint: normalizePlacementHint(value.placementHint),
-    scaleHint: normalizeScaleHint(value.scaleHint),
-    orientationHint: normalizeOrientationHint(value.orientationHint),
-    reason,
-    priority: Math.round(clamp(clampFiniteNumber(value.priority, index + 1), 1, 9))
-  });
-}
-
-function sanitizeSceneAnalysis(value: unknown, input: DrawRequest): SceneAnalysis {
-  const root = extractRoot(value);
-  if (!isJsonObject(root)) {
-    return sceneAnalysisSchema.parse({
-      scene: "current sketch",
-      why: "I could not read the scene reliably enough to choose a confident addition.",
-      subjects: [],
-      additions: []
-    });
-  }
-
-  const rawSubjects = Array.isArray(root.subjects)
-    ? root.subjects
-    : Array.isArray(root.objects)
-      ? root.objects
-      : Array.isArray(root.sceneObjects)
-        ? root.sceneObjects
-        : [];
-
-  const subjects = rawSubjects
-    .map((item, index) => normalizeSubject(item, input, index))
-    .filter((item): item is SceneSubject => item !== null)
-    .slice(0, 12);
-
-  const rawAdditions = Array.isArray(root.additions)
-    ? root.additions
-    : Array.isArray(root.proposals)
-      ? root.proposals
-      : Array.isArray(root.suggestions)
-        ? root.suggestions
-        : [];
-
-  const additions = rawAdditions
-    .map((item, index) => normalizeAddition(item, subjects, index))
-    .filter((item): item is SceneAddition => item !== null)
-    .slice(0, 5);
-
-  return sceneAnalysisSchema.parse({
-    scene:
-      typeof root.scene === "string" && root.scene.trim()
-        ? root.scene.trim().slice(0, 160)
-        : "current sketch",
-    why:
-      typeof root.why === "string" && root.why.trim()
-        ? root.why.trim().slice(0, 200)
-        : "it has room for a small related addition",
-    subjects,
-    additions
-  });
-}
-
-function buildFallbackSceneAnalysis(reason?: string): SceneAnalysis {
-  return sceneAnalysisSchema.parse({
-    scene: "current sketch",
-    why: reason ?? "I could not read the scene reliably enough to choose a confident addition.",
-    subjects: [],
-    additions: []
-  });
-}
-
-function buildAnalysisSystemPrompt(input: DrawRequest) {
-  return [
-    "You analyze a live collaborative whiteboard drawing.",
-    "Return only strict JSON.",
-    'Return exactly this shape: {"scene":"house with trees","why":"why the scene reads this way","subjects":[{"id":"subj_house_1","family":"house","label":"house","bbox":{"x":220,"y":180,"width":260,"height":240}}],"additions":[{"id":"add_1","family":"chimney","targetSubjectId":"subj_house_1","relation":"attach_roof_right","placementHint":{"xRatio":0.72,"yRatio":0.18},"scaleHint":{"widthRatio":0.12,"heightRatio":0.24},"orientationHint":"vertical","reason":"adds a lived-in roof detail","priority":1}]}.',
-    "Do not return markdown, explanations, or stroke geometry.",
-    "family is a short object label like chimney, mailbox, porch light, hedge, cat, pond, fence, cloud, or flag.",
-    `relation must be one of: ${relationValues.join(", ")}.`,
-    "subjects are things already present in the user's drawing.",
-    "additions are 1 to 5 new objects or scene elements that fit naturally in the picture.",
-    "Use more additions when the page is sparse or when several small related details belong together.",
-    "Use targetSubjectId when the addition belongs to a specific subject.",
-    "Choose a relation that describes placement semantically, not numerically.",
-    "placementHint gives coarse local placement within the target subject or scene cluster using xRatio and yRatio from 0 to 1 plus optional biasX and biasY from -1 to 1.",
-    "scaleHint gives coarse size intent using widthRatio and heightRatio relative to the target subject or local scene area.",
-    "orientationHint should be one of horizontal, vertical, diagonal_left, diagonal_right, arched, floating, or upright.",
-    "These hints should be coarse and approximate, not pixel-perfect.",
-    input.mode === "comment"
-      ? "If there is a target comment, prioritize an addition near the commented subject."
-      : "Address the whole page naturally and choose what genuinely fits best in the picture."
-  ].join(" ");
-}
-
-function buildAnalysisUserPayload(input: DrawRequest) {
-  const targetComment =
-    input.mode === "comment" && input.targetCommentId
-      ? input.comments.find((comment) => comment.id === input.targetCommentId) ?? null
-      : null;
-
-  return JSON.stringify(
-    {
-      mode: input.mode,
-      canvas: {
-        width: input.canvasWidth,
-        height: input.canvasHeight
-      },
-      supportedRelations: relationValues,
-      palette: input.palette,
-      recentHumanMarks: input.humanDelta,
-      recentAiMarks: input.aiDelta,
-      recentTurnHistory: input.turnHistory.slice(-4).map((entry) => ({
-        role: entry.role,
-        summary: entry.summary
-      })),
-      targetComment:
-        targetComment
-          ? {
-              id: targetComment.id,
-              x: targetComment.x,
-              y: targetComment.y,
-              text: targetComment.text
-            }
-          : null
-    },
-    null,
-    2
-  );
-}
-
-function sanitizeShortText(value: unknown, maxLength: number) {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  const normalized = value.trim().replace(/\s+/g, " ");
-  return normalized ? normalized.slice(0, maxLength) : undefined;
+  return mode === "addition" ? "detail" : null;
 }
 
 function normalizePaletteColor(color: unknown, palette: string[]) {
@@ -661,8 +261,8 @@ function normalizePaletteColor(color: unknown, palette: string[]) {
     }
 
     const semanticMatches: Array<[string[], string | undefined]> = [
-      [["black", "ink", "dark", "outline"], palette[0]],
-      [["blue", "sky"], palette[1]],
+      [["black", "ink", "dark", "outline", "charcoal"], palette[0]],
+      [["blue", "sky", "water"], palette[1]],
       [["red", "pink", "coral"], palette[2]],
       [["orange", "gold", "yellow", "sun"], palette[3]],
       [["green", "teal", "grass", "leaf"], palette[4]]
@@ -678,66 +278,26 @@ function normalizePaletteColor(color: unknown, palette: string[]) {
   return palette[0];
 }
 
-function clampTuplePoint(
-  point: unknown,
-  input: DrawRequest
-): [number, number] | null {
-  if (Array.isArray(point) && point.length >= 2) {
-    const x = clamp(clampFiniteNumber(point[0], NaN), 0, input.canvasWidth);
-    const y = clamp(clampFiniteNumber(point[1], NaN), 0, input.canvasHeight);
-    if (Number.isFinite(x) && Number.isFinite(y)) {
-      return [Math.round(x), Math.round(y)];
-    }
+function normalizeOrientationHint(value: unknown): OrientationHint | undefined {
+  if (typeof value !== "string") {
+    return undefined;
   }
 
-  if (isJsonObject(point)) {
-    const x = clamp(clampFiniteNumber(point.x, NaN), 0, input.canvasWidth);
-    const y = clamp(clampFiniteNumber(point.y, NaN), 0, input.canvasHeight);
-    if (Number.isFinite(x) && Number.isFinite(y)) {
-      return [Math.round(x), Math.round(y)];
-    }
-  }
-
-  return null;
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, "_");
+  return orientationHintSchema.options.includes(normalized as OrientationHint)
+    ? orientationHintSchema.parse(normalized)
+    : undefined;
 }
 
-function downsamplePoints(points: [number, number][], limit: number) {
-  if (points.length <= limit) {
-    return points;
+function normalizeSizeHint(value: unknown): SizeHint | undefined {
+  if (typeof value !== "string") {
+    return undefined;
   }
 
-  const stride = (points.length - 1) / (limit - 1);
-  const sampled: [number, number][] = [];
-
-  for (let index = 0; index < limit; index += 1) {
-    const sourceIndex = Math.round(index * stride);
-    sampled.push(points[Math.min(points.length - 1, sourceIndex)]);
-  }
-
-  return sampled;
-}
-
-function getPointBounds(points: [number, number][]) {
-  let minX = Number.POSITIVE_INFINITY;
-  let minY = Number.POSITIVE_INFINITY;
-  let maxX = Number.NEGATIVE_INFINITY;
-  let maxY = Number.NEGATIVE_INFINITY;
-
-  for (const [x, y] of points) {
-    minX = Math.min(minX, x);
-    minY = Math.min(minY, y);
-    maxX = Math.max(maxX, x);
-    maxY = Math.max(maxY, y);
-  }
-
-  return {
-    minX,
-    minY,
-    maxX,
-    maxY,
-    width: Math.max(0, maxX - minX),
-    height: Math.max(0, maxY - minY)
-  };
+  const normalized = value.trim().toLowerCase();
+  return sizeHintSchema.options.includes(normalized as SizeHint)
+    ? sizeHintSchema.parse(normalized)
+    : undefined;
 }
 
 function normalizeShapeKind(rawShape: string) {
@@ -804,47 +364,462 @@ function isLargeOpaqueShapeEvent(
     return false;
   }
 
+  const bounds = gridCellsToBounds(event.gridCells, input.canvasWidth, input.canvasHeight);
   const areaRatio =
-    (Math.max(1, event.width) * Math.max(1, event.height)) /
+    (Math.max(1, bounds.width) * Math.max(1, bounds.height)) /
     Math.max(1, input.canvasWidth * input.canvasHeight);
 
   return areaRatio > 0.05;
 }
 
-function assertPlanLooksDrawable(plan: GeminiDrawPlan, input: DrawRequest) {
-  const visualEvents = plan.events.filter(
-    (event) =>
-      event.type === "stroke" ||
-      event.type === "shape" ||
-      event.type === "ascii_block"
-  );
-
-  if (visualEvents.length === 0) {
-    return;
+function normalizeViewBox(value: unknown): SvgViewBox | undefined {
+  if (!isJsonObject(value)) {
+    return undefined;
   }
 
-  const largeOpaqueShapes = visualEvents.filter(
-    (
-      event
-    ): event is Extract<PlannedDrawEvent, { type: "shape" }> =>
-      event.type === "shape" && isLargeOpaqueShapeEvent(event, input)
-  );
+  return svgViewBoxSchema.parse({
+    width: clamp(clampFiniteNumber(value.width, 100), 1, 10000),
+    height: clamp(clampFiniteNumber(value.height, 100), 1, 10000)
+  });
+}
 
-  const hasStructureOutlines = visualEvents.some((event) => {
-    if (event.type === "stroke" || event.type === "ascii_block") {
-      return true;
+function normalizeBoundingBox(
+  value: unknown,
+  input: DrawRequest,
+  fallback: ObjectBoundingBox
+) {
+  if (!isJsonObject(value)) {
+    return objectBoundingBoxSchema.parse(fallback);
+  }
+
+  const width = clamp(clampFiniteNumber(value.width, fallback.width), 12, input.canvasWidth);
+  const height = clamp(clampFiniteNumber(value.height, fallback.height), 12, input.canvasHeight);
+  const x = clamp(clampFiniteNumber(value.x, fallback.x), 0, Math.max(0, input.canvasWidth - width));
+  const y = clamp(clampFiniteNumber(value.y, fallback.y), 0, Math.max(0, input.canvasHeight - height));
+
+  return objectBoundingBoxSchema.parse({
+    x: Math.round(x),
+    y: Math.round(y),
+    width: Math.round(width),
+    height: Math.round(height)
+  });
+}
+
+function parseSemanticGridCellString(value: string): SemanticGridCell | null {
+  const match = value.trim().toUpperCase().match(/^([A-L])\s*([1-9]|1[0-2])$/);
+  if (!match) {
+    return null;
+  }
+
+  return semanticGridCellSchema.parse([match[1], Number(match[2])]);
+}
+
+function normalizeSemanticGridCell(value: unknown): SemanticGridCell | null {
+  if (typeof value === "string") {
+    return parseSemanticGridCellString(value);
+  }
+
+  if (Array.isArray(value) && value.length >= 2) {
+    const column = typeof value[0] === "string" ? value[0].trim().toUpperCase() : "";
+    const row = typeof value[1] === "number" ? value[1] : Number(value[1]);
+    if (column && Number.isInteger(row)) {
+      try {
+        return semanticGridCellSchema.parse([column, row]);
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  if (isJsonObject(value)) {
+    const columnValue =
+      typeof value.column === "string"
+        ? value.column
+        : typeof value.col === "string"
+          ? value.col
+          : typeof value.x === "string"
+            ? value.x
+            : "";
+    const rowValue =
+      typeof value.row === "number" || typeof value.row === "string"
+        ? Number(value.row)
+        : typeof value.y === "number" || typeof value.y === "string"
+          ? Number(value.y)
+          : NaN;
+    if (columnValue && Number.isInteger(rowValue)) {
+      try {
+        return semanticGridCellSchema.parse([columnValue.trim().toUpperCase(), rowValue]);
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  return null;
+}
+
+function normalizeSemanticGridCells(
+  value: unknown,
+  input: DrawRequest,
+  fallbackBounds?: ObjectBoundingBox
+) {
+  const cells = Array.isArray(value)
+    ? value
+        .map((entry) => normalizeSemanticGridCell(entry))
+        .filter((entry): entry is SemanticGridCell => entry !== null)
+    : [];
+
+  if (cells.length > 0) {
+    return dedupeGridCells(cells).slice(0, 48);
+  }
+
+  if (fallbackBounds) {
+    return mapBoundsToGridCells(fallbackBounds, input.canvasWidth, input.canvasHeight).slice(0, 48);
+  }
+
+  return [] as SemanticGridCell[];
+}
+
+function normalizeClaimedGridCells(
+  value: unknown,
+  input: DrawRequest,
+  fallbackCells: SemanticGridCell[] = []
+) {
+  const normalized = normalizeSemanticGridCells(value, input);
+  if (normalized.length > 0) {
+    return semanticGridCellsSchema.parse(normalized);
+  }
+
+  return semanticGridCellsSchema.parse(fallbackCells.slice(0, 16));
+}
+
+function getHumanSceneBounds(input: DrawRequest) {
+  const boxes = input.humanDelta.map((item) => getHumanContextBoundingBox(item));
+  if (boxes.length === 0) {
+    return objectBoundingBoxSchema.parse({
+      x: input.canvasWidth * 0.34,
+      y: input.canvasHeight * 0.3,
+      width: input.canvasWidth * 0.32,
+      height: input.canvasHeight * 0.28
+    });
+  }
+
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  for (const box of boxes) {
+    minX = Math.min(minX, box.x);
+    minY = Math.min(minY, box.y);
+    maxX = Math.max(maxX, box.x + box.width);
+    maxY = Math.max(maxY, box.y + box.height);
+  }
+
+  return objectBoundingBoxSchema.parse({
+    x: Math.round(minX),
+    y: Math.round(minY),
+    width: Math.max(1, Math.round(maxX - minX)),
+    height: Math.max(1, Math.round(maxY - minY))
+  });
+}
+
+function getSceneCenterCell(input: DrawRequest) {
+  const bounds = getHumanSceneBounds(input);
+  return pointToGridCell(
+    bounds.x + bounds.width * 0.5,
+    bounds.y + bounds.height * 0.5,
+    input.canvasWidth,
+    input.canvasHeight
+  );
+}
+
+function getSubjectCenterCell(subject: SceneSubject, input: DrawRequest) {
+  const bounds = subject.bbox;
+  return pointToGridCell(
+    bounds.x + bounds.width * 0.5,
+    bounds.y + bounds.height * 0.5,
+    input.canvasWidth,
+    input.canvasHeight
+  );
+}
+
+function chooseFallbackTargetCell(
+  family: ObjectFamily,
+  input: DrawRequest,
+  targetSubject: SceneSubject | null
+) {
+  if (targetSubject) {
+    const centerCell = getSubjectCenterCell(targetSubject, input);
+    const [column, row] = centerCell;
+
+    if (includesAny(family, ["cloud", "bird", "sun", "moon", "star"])) {
+      return semanticGridCellSchema.parse([column, Math.max(1, row - 2)]);
+    }
+    if (includesAny(family, ["grass", "flower", "path", "pond", "water", "fence"])) {
+      return semanticGridCellSchema.parse([column, Math.min(12, row + 1)]);
     }
 
-    return !event.fill || event.fill === "transparent";
-  });
+    return centerCell;
+  }
 
-  const hasLargeOpaqueStructuralShape = largeOpaqueShapes.some((event) =>
-    ["rect", "triangle", "trapezoid"].includes(event.shape)
+  return getSceneCenterCell(input);
+}
+
+function normalizeSubject(
+  value: unknown,
+  input: DrawRequest,
+  index: number
+): SceneSubject | null {
+  if (!isJsonObject(value)) {
+    return null;
+  }
+
+  const family = normalizeFamily(
+    value.family ?? value.label ?? value.type ?? value.name,
+    `${value.label ?? ""}`,
+    "subject"
+  );
+  if (!family) {
+    return null;
+  }
+
+  const fallbackBounds =
+    isJsonObject(value.bbox)
+      ? normalizeBoundingBox(value.bbox, input, getHumanSceneBounds(input))
+      : undefined;
+  const occupiedGridCells = normalizeSemanticGridCells(
+    value.occupiedGridCells ?? value.gridCells ?? value.cells,
+    input,
+    fallbackBounds
   );
 
-  if (hasLargeOpaqueStructuralShape || (largeOpaqueShapes.length > 1 && !hasStructureOutlines)) {
-    throw new Error("Draw plan relies on large opaque primitive blocks instead of drawable structure.");
+  if (occupiedGridCells.length === 0) {
+    return null;
   }
+
+  return sceneSubjectSchema.parse({
+    id:
+      typeof value.id === "string" && value.id.trim()
+        ? value.id.trim().slice(0, 64)
+        : createId(`subject-${index + 1}`),
+    family,
+    label:
+      typeof value.label === "string" && value.label.trim()
+        ? value.label.trim().slice(0, 80)
+        : family,
+    occupiedGridCells,
+    bbox: gridCellsToBounds(occupiedGridCells, input.canvasWidth, input.canvasHeight)
+  });
+}
+
+function normalizeAddition(
+  value: unknown,
+  subjects: SceneSubject[],
+  input: DrawRequest,
+  index: number
+): SceneAddition | null {
+  if (!isJsonObject(value)) {
+    return null;
+  }
+
+  const family = normalizeFamily(
+    value.family ?? value.label ?? value.type ?? value.name,
+    `${value.reason ?? ""}`,
+    "addition"
+  );
+  if (!family) {
+    return null;
+  }
+
+  const targetSubject =
+    typeof value.targetSubjectId === "string"
+      ? subjects.find((subject) => subject.id === value.targetSubjectId) ?? null
+      : null;
+
+  const gridCells = normalizeClaimedGridCells(
+    value.gridCells ?? value.cells ?? value.targetGridCell ?? value.gridCell ?? value.cell,
+    input,
+    [chooseFallbackTargetCell(family, input, targetSubject)]
+  );
+
+  const reason =
+    typeof value.reason === "string" && value.reason.trim()
+      ? value.reason.trim().slice(0, 160)
+      : `adds ${family} to the scene`;
+
+  return sceneAdditionSchema.parse({
+    id:
+      typeof value.id === "string" && value.id.trim()
+        ? value.id.trim().slice(0, 64)
+        : createId(`addition-${index + 1}`),
+    family,
+    gridCells,
+    targetSubjectId: targetSubject?.id,
+    sizeHint: normalizeSizeHint(value.sizeHint),
+    orientationHint: normalizeOrientationHint(value.orientationHint),
+    reason,
+    priority: Math.round(clamp(clampFiniteNumber(value.priority, index + 1), 1, 9))
+  });
+}
+
+function sanitizeSceneAnalysis(value: unknown, input: DrawRequest): SceneAnalysis {
+  const root = extractRoot(value);
+  if (!isJsonObject(root)) {
+    return buildFallbackSceneAnalysis();
+  }
+
+  const rawSubjects = Array.isArray(root.subjects)
+    ? root.subjects
+    : Array.isArray(root.objects)
+      ? root.objects
+      : Array.isArray(root.sceneObjects)
+        ? root.sceneObjects
+        : [];
+
+  const subjects = rawSubjects
+    .map((item, index) => normalizeSubject(item, input, index))
+    .filter((item): item is SceneSubject => item !== null)
+    .slice(0, 12);
+
+  const rawAdditions = Array.isArray(root.additions)
+    ? root.additions
+    : Array.isArray(root.proposals)
+      ? root.proposals
+      : Array.isArray(root.suggestions)
+        ? root.suggestions
+        : [];
+
+  const additions = rawAdditions
+    .map((item, index) => normalizeAddition(item, subjects, input, index))
+    .filter((item): item is SceneAddition => item !== null)
+    .slice(0, 5);
+
+  return sceneAnalysisSchema.parse({
+    scene:
+      typeof root.scene === "string" && root.scene.trim()
+        ? root.scene.trim().slice(0, 160)
+        : "current sketch",
+    why:
+      typeof root.why === "string" && root.why.trim()
+        ? root.why.trim().slice(0, 200)
+        : "it has room for a small related addition",
+    subjects,
+    additions
+  });
+}
+
+function buildFallbackSceneAnalysis(reason?: string): SceneAnalysis {
+  return sceneAnalysisSchema.parse({
+    scene: "current sketch",
+    why: reason ?? "I could not read the scene reliably enough to choose a confident addition.",
+    subjects: [],
+    additions: []
+  });
+}
+
+function buildAnalysisSystemPrompt(input: DrawRequest) {
+  return [
+    "You analyze a live collaborative whiteboard drawing.",
+    "Return only strict JSON. Do not use markdown.",
+    'Return this exact top-level shape: {"scene":"house with trees","why":"why the scene reads this way","subjects":[{"id":"subj_house_1","family":"house","label":"house","occupiedGridCells":[["D",5],["E",5],["D",6],["E",6]]}],"additions":[{"id":"add_1","family":"chimney","targetSubjectId":"subj_house_1","gridCells":[["E",4]],"sizeHint":"small","orientationHint":"vertical","reason":"adds a lived-in roof detail","priority":1},{"id":"add_2","family":"house","gridCells":[["J",10],["K",10],["J",11],["K",11]],"reason":"adds a second house that fits the scene context","priority":2}]}.',
+    "Use the semantic grid as the placement language. The grid is 12 columns by 12 rows, columns A through L and rows 1 through 12.",
+    "subjects are things that already exist in the user's drawing.",
+    "Describe each subject with occupiedGridCells, not raw pixel bounds.",
+    "additions are 1 to 5 new objects or scene elements that fit naturally in the picture.",
+    "Every addition must choose gridCells, an array of 1 to 16 semantic grid cells that defines both placement and size.",
+    "Use targetSubjectId when the addition belongs near a specific existing subject.",
+    "To avoid overlapping the user's drawing, you MUST check the occupiedHumanCells provided in the payload. Do not place your gridCells inside the user's cells unless you are intentionally drawing a detail attached to their object.",
+    'Control the size of your drawing by the number of grid cells you claim. A small bird might use [["A",2]]. A large house should use a block like [["J",10],["K",10],["J",11],["K",11]].',
+    "Prefer additions that are not already explicitly drawn, as long as they fit the scene context naturally.",
+    "A good addition often complements the scene with a related context object, ambient detail, or supporting background element instead of duplicating the main subject.",
+    "Only repeat an existing subject when the scene genuinely benefits from another instance, such as another cloud, star, flower, or wave.",
+    "sizeHint should be small, medium, or large.",
+    "orientationHint should be one of horizontal, vertical, diagonal_left, diagonal_right, arched, floating, or upright when useful.",
+    "Use more additions when the page is sparse or when several small related details belong together.",
+    "Do not return stroke geometry or pixel coordinates.",
+    input.mode === "comment"
+      ? "If there is a target comment, prioritize an addition in or adjacent to the comment's grid cell."
+      : "Address the whole page naturally and choose what genuinely fits best in the picture."
+  ].join(" ");
+}
+
+function buildAnalysisUserPayload(input: DrawRequest) {
+  const targetComment =
+    input.mode === "comment" && input.targetCommentId
+      ? input.comments.find((comment) => comment.id === input.targetCommentId) ?? null
+      : null;
+  const humanGridSummary = summarizeHumanContextGrid(
+    input.humanDelta,
+    input.canvasWidth,
+    input.canvasHeight
+  );
+  const aiGridSummary = input.aiDelta.map((stroke, index) => {
+    const bounds = getPointBounds(stroke.points);
+    const occupiedGridCells = mapBoundsToGridCells(
+      {
+        x: bounds.minX,
+        y: bounds.minY,
+        width: Math.max(1, bounds.width),
+        height: Math.max(1, bounds.height)
+      },
+      input.canvasWidth,
+      input.canvasHeight
+    );
+    return {
+      label: `ai stroke ${index + 1}`,
+      color: stroke.color,
+      occupiedGridCells: occupiedGridCells.map(semanticGridCellLabel)
+    };
+  });
+
+  return JSON.stringify(
+    {
+      mode: input.mode,
+      canvas: {
+        width: input.canvasWidth,
+        height: input.canvasHeight
+      },
+      semanticGrid: {
+        columns: "A-L",
+        rows: "1-12"
+      },
+      occupiedHumanCells: dedupeGridCells(
+        humanGridSummary.flatMap((entry) => entry.occupiedGridCells)
+      ).map(semanticGridCellLabel),
+      humanGridSummary: humanGridSummary.map((entry) => ({
+        kind: entry.kind,
+        label: entry.label,
+        occupiedGridCells: entry.occupiedGridCells.map(semanticGridCellLabel)
+      })),
+      humanSceneFootprint: dedupeGridCells(
+        humanGridSummary.flatMap((entry) => entry.occupiedGridCells)
+      ).map(semanticGridCellLabel),
+      aiGridSummary,
+      palette: input.palette,
+      recentTurnHistory: input.turnHistory.slice(-4).map((entry) => ({
+        role: entry.role,
+        summary: entry.summary
+      })),
+      targetComment:
+        targetComment
+          ? {
+              id: targetComment.id,
+              text: targetComment.text,
+              gridCell: semanticGridCellLabel(
+                pointToGridCell(
+                  targetComment.x,
+                  targetComment.y,
+                  input.canvasWidth,
+                  input.canvasHeight
+                )
+              )
+            }
+          : null
+    },
+    null,
+    2
+  );
 }
 
 function getStrokeTravel(points: [number, number][]) {
@@ -876,82 +851,38 @@ function isSceneWideLabel(label: string | undefined) {
   ]);
 }
 
-function splitStrokeRuns(
-  points: [number, number][],
-  jumpLimit: number
-) {
-  const runs: [number, number][][] = [];
-  let currentRun: [number, number][] = [];
-
-  for (const point of points) {
-    if (currentRun.length === 0) {
-      currentRun.push(point);
-      continue;
-    }
-
-    const previous = currentRun[currentRun.length - 1];
-    const jump = Math.hypot(point[0] - previous[0], point[1] - previous[1]);
-
-    if (jump > jumpLimit) {
-      if (currentRun.length >= 2) {
-        runs.push(currentRun);
-      }
-      currentRun = [point];
-      continue;
-    }
-
-    currentRun.push(point);
-  }
-
-  if (currentRun.length >= 2) {
-    runs.push(currentRun);
-  }
-
-  return runs;
-}
-
-function sanitizeStrokePoints(
-  points: [number, number][],
+function validateSampledStroke(
+  svgPath: string,
+  frame: ObjectBoundingBox,
+  viewBox: SvgViewBox | undefined,
   input: DrawRequest,
   label?: string
 ) {
-  const deduped: [number, number][] = [];
+  let points: [number, number][];
 
-  for (const point of points) {
-    const previous = deduped[deduped.length - 1];
-    if (!previous) {
-      deduped.push(point);
-      continue;
-    }
+  try {
+    points = svgPathToFramePoints(svgPath, frame, viewBox, {
+      curveSubdivisions: 18,
+      maxPoints: 192
+    });
+  } catch {
+    return false;
+  }
 
-    const distance = Math.hypot(point[0] - previous[0], point[1] - previous[1]);
-    if (distance >= 2) {
-      deduped.push(point);
+  if (points.length < 2) {
+    return false;
+  }
+
+  for (const [x, y] of points) {
+    if (x < 0 || x > input.canvasWidth || y < 0 || y > input.canvasHeight) {
+      return false;
     }
   }
 
-  if (deduped.length < 2) {
-    return null;
-  }
-
-  const canvasDiagonal = Math.hypot(input.canvasWidth, input.canvasHeight);
-  const jumpLimit = Math.max(84, canvasDiagonal * 0.18);
-  const runs = splitStrokeRuns(deduped, jumpLimit);
-  if (runs.length === 0) {
-    return null;
-  }
-
-  const bestRun = runs.sort((left, right) => {
-    if (right.length !== left.length) {
-      return right.length - left.length;
-    }
-    return getStrokeTravel(right) - getStrokeTravel(left);
-  })[0];
-
-  const boundedRun = downsamplePoints(bestRun, 48);
-  const bounds = getPointBounds(boundedRun);
-  const travel = getStrokeTravel(boundedRun);
+  const bounds = getPointBounds(points);
+  const travel = getStrokeTravel(points);
   const sceneWide = isSceneWideLabel(label);
+  const canvasDiagonal = Math.hypot(input.canvasWidth, input.canvasHeight);
 
   if (!sceneWide) {
     if (
@@ -959,65 +890,21 @@ function sanitizeStrokePoints(
       bounds.height > input.canvasHeight * 0.62 ||
       travel > canvasDiagonal * 0.9
     ) {
-      return null;
+      return false;
     }
   }
 
-  if (travel < 8 && boundedRun.length < 3) {
-    return null;
-  }
-
-  return boundedRun;
-}
-
-function extractJsonArrayField(rawText: string, field: string) {
-  const fieldIndex = rawText.indexOf(`"${field}"`);
-  if (fieldIndex < 0) {
-    return undefined;
-  }
-
-  const bracketIndex = rawText.indexOf("[", fieldIndex);
-  if (bracketIndex < 0) {
-    return undefined;
-  }
-
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-
-  for (let index = bracketIndex; index < rawText.length; index += 1) {
-    const char = rawText[index];
-
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === '"') {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (char === '"') {
-      inString = true;
-      continue;
-    }
-
-    if (char === "[") {
-      depth += 1;
-      continue;
-    }
-
-    if (char === "]") {
-      depth -= 1;
-      if (depth === 0) {
-        return rawText.slice(bracketIndex, index + 1);
-      }
+  for (let index = 1; index < points.length; index += 1) {
+    const jump = Math.hypot(
+      points[index][0] - points[index - 1][0],
+      points[index][1] - points[index - 1][1]
+    );
+    if (jump > Math.max(frame.width, frame.height) * 1.25 + 32) {
+      return false;
     }
   }
 
-  return undefined;
+  return true;
 }
 
 function normalizePlannedEvent(
@@ -1043,16 +930,29 @@ function normalizePlannedEvent(
     rawType;
 
   if (eventType === "stroke") {
-    const rawPoints = Array.isArray(value.points) ? value.points : [];
-    const points = sanitizeStrokePoints(
-      rawPoints
-        .map((point) => clampTuplePoint(point, input))
-        .filter((point): point is [number, number] => point !== null),
-      input,
-      sanitizeShortText(value.label ?? value.objectLabel, 120)
-    );
+    const svgPath =
+      typeof value.svgPath === "string"
+        ? value.svgPath.trim()
+        : typeof value.path === "string"
+          ? value.path.trim()
+          : typeof value.d === "string"
+            ? value.d.trim()
+            : "";
 
-    if (!points || points.length < 2) {
+    if (!svgPath) {
+      return null;
+    }
+
+    const gridCells = normalizeClaimedGridCells(value.gridCells ?? value.cells, input);
+    if (gridCells.length === 0) {
+      return null;
+    }
+    const frame = gridCellsToBounds(gridCells, input.canvasWidth, input.canvasHeight);
+    const viewBox = normalizeViewBox(value.viewBox);
+    const label = sanitizeShortText(value.label, 120);
+    const objectLabel = sanitizeShortText(value.objectLabel, 80);
+
+    if (!validateSampledStroke(svgPath, frame, viewBox, input, label ?? objectLabel)) {
       return null;
     }
 
@@ -1061,21 +961,23 @@ function normalizePlannedEvent(
       color: normalizePaletteColor(value.color, input.palette),
       width: input.activeStrokeSize,
       opacity: clamp(clampFiniteNumber(value.opacity, 0.92), 0.05, 1),
-      points,
+      svgPath,
+      gridCells,
+      viewBox,
       timing: isJsonObject(value.timing)
         ? {
             speed:
               value.timing.speed === undefined
                 ? undefined
-                : clamp(clampFiniteNumber(value.timing.speed, 0.7), 0.2, 3),
+                : clamp(clampFiniteNumber(value.timing.speed, 0.72), 0.2, 3),
             pauseAfterMs:
               value.timing.pauseAfterMs === undefined
                 ? undefined
                 : Math.round(clamp(clampFiniteNumber(value.timing.pauseAfterMs, 90), 0, 1200))
           }
         : undefined,
-      label: sanitizeShortText(value.label, 120),
-      objectLabel: sanitizeShortText(value.objectLabel, 80)
+      label,
+      objectLabel
     });
   }
 
@@ -1086,16 +988,11 @@ function normalizePlannedEvent(
         : "scribble";
     const shape = normalizeShapeKind(rawShape);
     const color = normalizePaletteColor(value.color, input.palette);
-    const width = clamp(
-      Math.abs(clampFiniteNumber(value.width, input.canvasWidth * 0.12)),
-      12,
-      input.canvasWidth * 0.62
-    );
-    const height = clamp(
-      Math.abs(clampFiniteNumber(value.height, input.canvasHeight * 0.12)),
-      12,
-      input.canvasHeight * 0.62
-    );
+    const gridCells = normalizeClaimedGridCells(value.gridCells ?? value.cells, input);
+    if (gridCells.length === 0) {
+      return null;
+    }
+    const bounds = gridCellsToBounds(gridCells, input.canvasWidth, input.canvasHeight);
 
     return plannedDrawEventSchema.parse({
       type: "shape",
@@ -1103,15 +1000,12 @@ function normalizePlannedEvent(
         ? shape
         : "scribble",
       color,
-      x: Math.round(clamp(clampFiniteNumber(value.x, input.canvasWidth * 0.5), 0, input.canvasWidth)),
-      y: Math.round(clamp(clampFiniteNumber(value.y, input.canvasHeight * 0.5), 0, input.canvasHeight)),
-      width,
-      height,
+      gridCells,
       rotation:
         value.rotation === undefined
           ? undefined
           : clamp(clampFiniteNumber(value.rotation, 0), -Math.PI * 2, Math.PI * 2),
-      fill: sanitizeShapeFill(value.fill, shape, color, width, height, input),
+      fill: sanitizeShapeFill(value.fill, shape, color, bounds.width, bounds.height, input),
       strokeWidth: input.activeStrokeSize
     });
   }
@@ -1121,18 +1015,22 @@ function normalizePlannedEvent(
     if (!text) {
       return null;
     }
+    const gridCells = normalizeClaimedGridCells(value.gridCells ?? value.cells, input);
+    if (gridCells.length === 0) {
+      return null;
+    }
+    const bounds = gridCellsToBounds(gridCells, input.canvasWidth, input.canvasHeight);
 
     return plannedDrawEventSchema.parse({
       type: "ascii_block",
       color: normalizePaletteColor(value.color, input.palette),
-      x: Math.round(clamp(clampFiniteNumber(value.x, input.canvasWidth * 0.5), 0, input.canvasWidth)),
-      y: Math.round(clamp(clampFiniteNumber(value.y, input.canvasHeight * 0.5), 0, input.canvasHeight)),
+      gridCells,
       text,
-      fontSize: clamp(clampFiniteNumber(value.fontSize, 28), 12, 96),
-      width:
-        value.width === undefined
-          ? undefined
-          : clamp(clampFiniteNumber(value.width, 120), 24, input.canvasWidth)
+      fontSize: clamp(
+        clampFiniteNumber(value.fontSize, Math.max(12, bounds.height * 0.32)),
+        12,
+        96
+      )
     });
   }
 
@@ -1175,7 +1073,7 @@ function sanitizeGeminiDrawPlan(value: unknown, input: DrawRequest): GeminiDrawP
       ? container.events
       : Array.isArray(container.actions)
         ? container.actions
-      : Array.isArray(container.drawEvents)
+        : Array.isArray(container.drawEvents)
           ? container.drawEvents
           : [];
 
@@ -1218,6 +1116,42 @@ function sanitizeGeminiDrawPlan(value: unknown, input: DrawRequest): GeminiDrawP
   });
 }
 
+function assertPlanLooksDrawable(plan: GeminiDrawPlan, input: DrawRequest) {
+  const visualEvents = plan.events.filter(
+    (event) =>
+      event.type === "stroke" ||
+      event.type === "shape" ||
+      event.type === "ascii_block"
+  );
+
+  if (visualEvents.length === 0) {
+    return;
+  }
+
+  const largeOpaqueShapes = visualEvents.filter(
+    (
+      event
+    ): event is Extract<PlannedDrawEvent, { type: "shape" }> =>
+      event.type === "shape" && isLargeOpaqueShapeEvent(event, input)
+  );
+
+  const hasStructureOutlines = visualEvents.some((event) => {
+    if (event.type === "stroke" || event.type === "ascii_block") {
+      return true;
+    }
+
+    return !event.fill || event.fill === "transparent";
+  });
+
+  const hasLargeOpaqueStructuralShape = largeOpaqueShapes.some((event) =>
+    ["rect", "triangle", "trapezoid"].includes(event.shape)
+  );
+
+  if (hasLargeOpaqueStructuralShape || (largeOpaqueShapes.length > 1 && !hasStructureOutlines)) {
+    throw new Error("Draw plan relies on large opaque primitive blocks instead of drawable structure.");
+  }
+}
+
 function buildDrawSystemPrompt(input: DrawRequest) {
   return [
     "You are a collaborative drawing agent controlling a live whiteboard.",
@@ -1225,37 +1159,37 @@ function buildDrawSystemPrompt(input: DrawRequest) {
     'Return this exact top-level shape: {"thinking":"short hidden planning note","narration":"what you are adding","summary":"what you added overall","previewSaw":"what you see in the picture","previewDrawing":"what you plan to add","events":[...]}',
     "events must be an array of drawing operations that the client will render.",
     'Allowed event types: stroke, shape, ascii_block, say, set_palette, comment_reply.',
-    'stroke event shape: {"type":"stroke","color":"#262523","width":6,"opacity":0.92,"points":[[120,80],[140,96],[162,120]],"timing":{"speed":0.7,"pauseAfterMs":90},"label":"tree"}',
-    'shape event shape: {"type":"shape","shape":"circle","color":"#f4a261","x":320,"y":120,"width":90,"height":90,"strokeWidth":4,"fill":"transparent"}',
-    'You may also use {"shape":"triangle"} or {"shape":"trapezoid"} for roofs and simple outlined structures.',
-    'ascii_block event shape: {"type":"ascii_block","color":"#262523","x":220,"y":140,"text":"^^","fontSize":28}',
+    'stroke event shape: {"type":"stroke","color":"#262523","width":6,"opacity":0.92,"svgPath":"M 8 74 C 18 48 34 20 54 18","gridCells":[["J",10],["K",10],["J",11],["K",11]],"viewBox":{"width":100,"height":100},"timing":{"speed":0.7,"pauseAfterMs":90},"label":"tree canopy"}',
+    'shape event shape: {"type":"shape","shape":"circle","color":"#f4a261","gridCells":[["B",2]],"strokeWidth":4,"fill":"transparent"}',
+    'ascii_block event shape: {"type":"ascii_block","color":"#262523","gridCells":[["C",3]],"text":"^^","fontSize":28}',
     'say event shape: {"type":"say","text":"I added a tree beside the house."}',
     'set_palette event shape: {"type":"set_palette","index":2}',
     'comment_reply event shape: {"type":"comment_reply","text":"I added something near your note."}',
-    "Do not return explanation outside the JSON object.",
-    "You are drawing, not describing a future drawing.",
-    "Prefer actual visual events over narration.",
+    "thinking is private reasoning, but it must still reflect the same concrete plan that appears in events.",
+    "previewDrawing, narration, and summary must describe only what is actually returned in events. Do not mention discarded alternatives or ideas you decided not to draw.",
+    "For stroke events, never return raw points arrays. Always return a standard SVG path string in svgPath.",
+    "Use local scalable path coordinates, normally a 0 to 100 viewBox space. Control placement and size with gridCells, not pixel frames.",
+    "Use only M, L, H, V, C, S, Q, T, and Z path commands. Do not use SVG arc commands A or a.",
+    "Each stroke path should be one local contour or contour fragment, not a whole scene dump.",
+    "To avoid overlapping the user's drawing, you MUST check the occupiedHumanCells provided in the payload. Do not place your gridCells inside the user's cells unless you are intentionally drawing a detail attached to their object, like smoke on a chimney.",
+    'Control the size of your drawing by the number of grid cells you claim. A small bird might use [["A",2]]. A large house should use a block like [["J",10],["K",10],["J",11],["K",11]].',
     "Stay inside the canvas bounds.",
     "Choose colors adaptively from the provided palette based on what fits the drawing best.",
-    "Do not default every mark to the same dark outline color unless the picture genuinely calls for it.",
     "Use only colors from the provided palette.",
     "Match every stroke width and every shape outline width to the provided active ink width.",
     "Prefer a few coherent additions that fit the picture.",
     "Think in objects and object parts, not random marks.",
-    "If you add a tree, draw a trunk and canopy. If you add a chimney, attach it to the roof and optionally add smoke. If you add a path, start it near the doorway or foreground groundline. If you add a cloud, use a compact cluster instead of one huge line.",
-    "Do not redraw the user's whole subject unless explicitly necessary.",
-    "Do not place context objects inside windows, doors, or the middle of another object unless that is obviously intended.",
+    "Prefer adding something that is not already explicitly present in the scene, as long as it fits the context.",
+    "Good contextual additions include background details, ambient elements, supporting objects, weather, sky details, ground details, or small companion objects that make the scene feel more complete.",
+    "Do not simply duplicate the exact subject already on the page unless repetition is natural for that kind of scene element.",
     "Use shape events when a circle, rectangle, triangle, trapezoid, or simple geometric form is cleaner than a stroke.",
-    "For houses, roofs, buildings, windows, doors, and other structural objects, use transparent fill and draw the outline. Do not use large solid blocks of color as the whole object.",
+    "For houses, roofs, buildings, windows, doors, and other structural objects, use transparent fill and draw the outline.",
     "Only use opaque fill for small accent shapes like a sun, berry, or tiny decorative detail.",
-    "Keep each stroke local and continuous. Never teleport across the canvas in one stroke.",
-    "For most objects, keep stroke point counts between 2 and 16. Only scene-wide elements like hills, water, or fences should use longer spans.",
+    "Choose 1 primary addition and, when the page is sparse and open, optionally add 1 secondary contextual or ambient detail.",
     "A normal turn should usually contain 1 to 4 coherent additions built from several local events.",
     "If the picture is sparse, you may add up to 5 related details, but they should still feel like one scene.",
-    "You may address the whole page naturally when it helps the composition.",
-    "Use smooth, short point sequences, not huge coordinate dumps.",
+    "If the page is sparse, do not limit yourself to touching only the existing object. It is often better to add one contextual element in the surrounding empty space, such as stars near a rocket, clouds near a boat, or grass near a house, when that improves the composition.",
     "Prefer 2 to 12 visual events, depending on the scene.",
-    "For sparse scenes, it is okay to add several related details.",
     "If you are unsure where to place something, choose a smaller safer local addition rather than a large sweeping mark.",
     input.mode === "comment"
       ? "If this is a comment-triggered turn, include one comment_reply event if it helps."
@@ -1268,10 +1202,14 @@ function buildDrawRepairSystemPrompt() {
     "You are repairing an invalid whiteboard drawing JSON response.",
     "Return only strict JSON.",
     "Preserve the same top-level shape with thinking, narration, summary, previewSaw, previewDrawing, and events.",
+    "thinking, narration, summary, and previewDrawing must stay consistent with the repaired events array.",
     "Fix malformed JSON, remove invalid events, and keep only drawable coherent events.",
     "Do not invent large new content. Prefer keeping fewer valid events over many questionable ones.",
-    "For stroke events, ensure points are short continuous local polylines.",
-    "For local objects like trees, chimneys, flowers, bushes, lamps, doors, and windows, avoid strokes that span most of the page.",
+    "For stroke events, keep svgPath as a valid standard SVG path string and express placement and size using gridCells instead of pixel frames.",
+    "Use only M, L, H, V, C, S, Q, T, and Z path commands. Remove or rewrite any SVG arc commands A or a.",
+    "Keep gridCells away from occupiedHumanCells unless the drawing is intentionally attached to the user's object.",
+    "Prefer repaired plans that keep one clear primary addition and optionally one small contextual ambient detail if it fits the scene.",
+    "For local objects like trees, chimneys, flowers, bushes, lamps, doors, and windows, avoid giant frames that span most of the page.",
     "For houses, roofs, and other structures, prefer outlined rectangle/triangle/trapezoid shapes with transparent fill.",
     "Remove or convert any large solid filled primitive blocks that would render as featureless slabs.",
     "Use only the allowed event types: stroke, shape, ascii_block, say, set_palette, comment_reply."
@@ -1279,13 +1217,22 @@ function buildDrawRepairSystemPrompt() {
 }
 
 function buildDrawRepairUserPayload(input: DrawRequest, rawPlan: string) {
+  const occupiedHumanCells = dedupeGridCells(
+    summarizeHumanContextGrid(input.humanDelta, input.canvasWidth, input.canvasHeight)
+      .flatMap((entry) => entry.occupiedGridCells)
+  ).map(semanticGridCellLabel);
+
   return JSON.stringify(
     {
       canvas: {
         width: input.canvasWidth,
         height: input.canvasHeight
       },
+      occupiedHumanCells,
       palette: input.palette,
+      activeInk: {
+        width: input.activeStrokeSize
+      },
       originalResponse: rawPlan
     },
     null,
@@ -1294,10 +1241,20 @@ function buildDrawRepairUserPayload(input: DrawRequest, rawPlan: string) {
 }
 
 function buildDrawUserPayload(input: DrawRequest) {
-  const humanBounds = extractHumanBounds(input);
+  const humanGridSummary = summarizeHumanContextGrid(
+    input.humanDelta,
+    input.canvasWidth,
+    input.canvasHeight
+  );
+  const sceneBounds = getHumanSceneBounds(input);
   const sceneCoverage =
-    (humanBounds.width * humanBounds.height) /
+    (sceneBounds.width * sceneBounds.height) /
     Math.max(1, input.canvasWidth * input.canvasHeight);
+  const unitScale = calculateUnitScale(
+    input.humanDelta,
+    input.canvasWidth,
+    input.canvasHeight
+  );
   const targetComment =
     input.mode === "comment" && input.targetCommentId
       ? input.comments.find((comment) => comment.id === input.targetCommentId) ?? null
@@ -1310,28 +1267,42 @@ function buildDrawUserPayload(input: DrawRequest) {
         width: input.canvasWidth,
         height: input.canvasHeight
       },
+      semanticGrid: {
+        columns: "A-L",
+        rows: "1-12",
+        occupiedHumanCells: dedupeGridCells(
+          humanGridSummary.flatMap((entry) => entry.occupiedGridCells)
+        ).map(semanticGridCellLabel)
+      },
+      occupiedHumanCells: dedupeGridCells(
+        humanGridSummary.flatMap((entry) => entry.occupiedGridCells)
+      ).map(semanticGridCellLabel),
       activeInk: {
         width: input.activeStrokeSize
       },
+      scaleGuide: {
+        averageWidth: Number(unitScale.averageWidth.toFixed(1)),
+        averageHeight: Number(unitScale.averageHeight.toFixed(1)),
+        unit: Number(unitScale.unit.toFixed(1))
+      },
       pageContext: {
         sceneCoverage: Number(sceneCoverage.toFixed(3)),
-        humanBounds: {
-          x: Math.round(humanBounds.minX),
-          y: Math.round(humanBounds.minY),
-          width: Math.round(humanBounds.width),
-          height: Math.round(humanBounds.height)
-        },
         visualDensity:
           sceneCoverage < 0.12 ? "sparse" : sceneCoverage < 0.28 ? "medium" : "dense"
       },
-      palette: input.palette,
-      recentHumanMarks: input.humanDelta,
+      recentHumanGridMarks: humanGridSummary.map((entry) => ({
+        kind: entry.kind,
+        label: entry.label,
+        occupiedGridCells: entry.occupiedGridCells.map(semanticGridCellLabel)
+      })),
       recentAiMarks: input.aiDelta,
+      palette: input.palette,
       comments: input.comments.slice(-6).map((comment) => ({
         id: comment.id,
-        x: comment.x,
-        y: comment.y,
         text: comment.text,
+        gridCell: semanticGridCellLabel(
+          pointToGridCell(comment.x, comment.y, input.canvasWidth, input.canvasHeight)
+        ),
         lastReply: comment.thread.at(-1)?.text ?? null
       })),
       turnHistory: input.turnHistory.slice(-6).map((entry) => ({
@@ -1342,9 +1313,15 @@ function buildDrawUserPayload(input: DrawRequest) {
         targetComment
           ? {
               id: targetComment.id,
-              x: targetComment.x,
-              y: targetComment.y,
-              text: targetComment.text
+              text: targetComment.text,
+              gridCell: semanticGridCellLabel(
+                pointToGridCell(
+                  targetComment.x,
+                  targetComment.y,
+                  input.canvasWidth,
+                  input.canvasHeight
+                )
+              )
             }
           : null
     },
@@ -1599,37 +1576,28 @@ export async function analyzeScene(input: DrawRequest): Promise<SceneAnalysis> {
         "[draw-ai] scene analysis request failed",
         error instanceof Error ? error.message : error
       );
-      return buildFallbackSceneAnalysis("The model was unavailable, so no addition was rendered.");
+      return buildFallbackSceneAnalysis("The scene analysis request failed.");
     }
   }
 
   if (!rawAnalysis) {
-    return buildFallbackSceneAnalysis("The model was unavailable, so no addition was rendered.");
+    return buildFallbackSceneAnalysis();
   }
 
-  console.info("[draw-ai] raw scene analysis response", rawAnalysis.slice(0, 1600));
+  console.info("[draw-ai] raw scene analysis", rawAnalysis.slice(0, 2000));
 
   try {
-    const analysis = parseSceneAnalysis(rawAnalysis, input);
-    console.info("[draw-ai] scene analysis accepted", {
-      scene: analysis.scene,
-      subjectCount: analysis.subjects.length,
-      additionCount: analysis.additions.length
-    });
-    return analysis;
+    return parseSceneAnalysis(rawAnalysis, input);
   } catch (error) {
     console.warn(
       "[draw-ai] scene analysis validation failed",
       error instanceof Error ? error.message : error
     );
 
-    return sceneAnalysisSchema.parse({
-      scene: extractJsonStringField(rawAnalysis, "scene") ?? "current sketch",
-      why:
-        extractJsonStringField(rawAnalysis, "why") ??
-        "I could not parse a reliable scene plan, so no addition was rendered.",
-      subjects: [],
-      additions: []
-    });
+    try {
+      return sanitizeSceneAnalysis(JSON.parse(stripCodeFence(rawAnalysis)), input);
+    } catch {
+      return buildFallbackSceneAnalysis("The scene analysis could not be parsed safely.");
+    }
   }
 }

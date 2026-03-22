@@ -18,6 +18,8 @@ import { describeRenderedAddition, renderSceneAddition } from "@/lib/sketch-rend
 import { getRequestIdentity } from "@/lib/auth";
 import { loadingMessages } from "@/lib/loading-messages";
 import { consumeDailyQuota } from "@/lib/quota";
+import { gridCellsToBounds } from "@/lib/scene-anchors";
+import { svgPathToFramePoints } from "@/lib/svg-path";
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -109,21 +111,15 @@ function getAdditionReferencePoint(
     ] as [number, number];
   }
 
-  if (analysis.subjects.length > 0) {
-    const total = analysis.subjects.reduce(
-      (sum, subject) => ({
-        x: sum.x + subject.bbox.x + subject.bbox.width * 0.5,
-        y: sum.y + subject.bbox.y + subject.bbox.height * 0.5
-      }),
-      { x: 0, y: 0 }
-    );
-    return [
-      total.x / analysis.subjects.length,
-      total.y / analysis.subjects.length
-    ] as [number, number];
-  }
-
-  return [input.canvasWidth * 0.5, input.canvasHeight * 0.5] as [number, number];
+  const targetCellBounds = gridCellsToBounds(
+    addition.gridCells,
+    input.canvasWidth,
+    input.canvasHeight
+  );
+  return [
+    targetCellBounds.x + targetCellBounds.width * 0.5,
+    targetCellBounds.y + targetCellBounds.height * 0.5
+  ] as [number, number];
 }
 
 function selectAdditions(
@@ -175,7 +171,7 @@ function renderedRecipeToEvents(
       kind: "aiStroke",
       color: action.color,
       opacity: action.opacity,
-      size: input.activeStrokeSize,
+      size: action.width,
       points: strokePoints,
       label: recipe.addition.reason,
       objectId: recipe.addition.id,
@@ -227,14 +223,19 @@ function plannedEventToStreamEvents(
 ): DrawStreamEvent[] {
   if (event.type === "stroke") {
     ensureColor(event.color, input.palette);
+    const frame = gridCellsToBounds(event.gridCells, input.canvasWidth, input.canvasHeight);
+    const points = svgPathToFramePoints(event.svgPath, frame, event.viewBox, {
+      curveSubdivisions: 18,
+      maxPoints: 192
+    });
     const stroke = aiStrokeSchema.parse({
       id: createId("ai-stroke"),
       createdAt: Date.now(),
       kind: "aiStroke",
       color: event.color,
       opacity: event.opacity ?? 0.92,
-      size: input.activeStrokeSize,
-      points: event.points.map(([x, y]) => {
+      size: event.width,
+      points: points.map(([x, y]) => {
         ensureInBounds(x, input.canvasWidth, "Point x");
         ensureInBounds(y, input.canvasHeight, "Point y");
         return { x, y };
@@ -249,16 +250,17 @@ function plannedEventToStreamEvents(
 
   if (event.type === "shape") {
     ensureColor(event.color, input.palette);
+    const bounds = gridCellsToBounds(event.gridCells, input.canvasWidth, input.canvasHeight);
     const shape = shapeSchema.parse({
       id: createId("ai-shape"),
       createdAt: Date.now(),
       color: event.color,
       kind: "shape",
       shape: event.shape,
-      x: event.x,
-      y: event.y,
-      width: event.width,
-      height: event.height,
+      x: bounds.x + bounds.width * 0.5,
+      y: bounds.y + bounds.height * 0.5,
+      width: bounds.width,
+      height: bounds.height,
       rotation: event.rotation,
       fill: event.fill,
       strokeWidth: input.activeStrokeSize
@@ -272,16 +274,17 @@ function plannedEventToStreamEvents(
 
   if (event.type === "ascii_block") {
     ensureColor(event.color, input.palette);
+    const bounds = gridCellsToBounds(event.gridCells, input.canvasWidth, input.canvasHeight);
     const block = asciiBlockSchema.parse({
       id: createId("ai-ascii"),
       createdAt: Date.now(),
       color: event.color,
       kind: "asciiBlock",
-      x: event.x,
-      y: event.y,
+      x: bounds.x,
+      y: bounds.y + event.fontSize,
       text: event.text,
       fontSize: event.fontSize,
-      width: event.width
+      width: bounds.width
     });
 
     ensureInBounds(block.x, input.canvasWidth, "ASCII block x");

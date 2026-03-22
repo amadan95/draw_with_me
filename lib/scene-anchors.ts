@@ -1,271 +1,283 @@
-import type {
-  ObjectBoundingBox,
-  PlannerHumanContext,
-  SceneSubject
+import {
+  semanticGridCellSchema,
+  semanticGridColumns,
+  type ObjectBoundingBox,
+  type PlannerHumanContext,
+  type SemanticGridCell,
+  type SemanticGridColumn
 } from "@/lib/draw-types";
 
-export type AnchorPoint = {
-  x: number;
-  y: number;
+export const SEMANTIC_GRID_SIZE = 12;
+
+export type UnitScale = {
+  averageWidth: number;
+  averageHeight: number;
+  unit: number;
+  sampleCount: number;
 };
 
-export type SubjectAnchors = {
-  bounds: ObjectBoundingBox;
-  center: AnchorPoint;
-  top: AnchorPoint;
-  bottom: AnchorPoint;
-  left: AnchorPoint;
-  right: AnchorPoint;
-  roofLeft: AnchorPoint;
-  roofPeak: AnchorPoint;
-  roofRight: AnchorPoint;
-  doorwayCenter: AnchorPoint;
-  groundCenter: AnchorPoint;
-  trunkBase: AnchorPoint;
-  canopyCenter: AnchorPoint;
+export type HumanContextGridSummary = {
+  kind: PlannerHumanContext["kind"];
+  label: string;
+  bbox: ObjectBoundingBox;
+  occupiedGridCells: SemanticGridCell[];
 };
 
-function includesAny(text: string | undefined, needles: string[]) {
-  if (!text) {
-    return false;
-  }
-
-  const haystack = text.toLowerCase();
-  return needles.some((needle) => haystack.includes(needle));
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
 
-function normalizeSubjectKind(subject: SceneSubject) {
-  const text = `${subject.family} ${subject.label}`.toLowerCase();
-
-  if (includesAny(text, ["house", "home", "barn", "hut", "cabin", "shed", "garage"])) {
-    return "house";
-  }
-  if (includesAny(text, ["tree", "oak", "pine", "palm"])) {
-    return "tree";
-  }
-  if (includesAny(text, ["hill", "mountain", "ridge"])) {
-    return "hill";
-  }
-  if (includesAny(text, ["water", "river", "lake", "pond", "stream", "sea"])) {
-    return "water";
-  }
-  if (includesAny(text, ["person", "face", "head", "portrait", "figure", "character"])) {
-    return "figure";
-  }
-
-  return "generic";
-}
-
-function defaultAnchors(subject: SceneSubject): SubjectAnchors {
-  const { x, y, width, height } = subject.bbox;
-  const center = { x: x + width * 0.5, y: y + height * 0.5 };
-
+function roundBox(box: ObjectBoundingBox): ObjectBoundingBox {
   return {
-    bounds: subject.bbox,
-    center,
-    top: { x: center.x, y },
-    bottom: { x: center.x, y: y + height },
-    left: { x, y: center.y },
-    right: { x: x + width, y: center.y },
-    roofLeft: { x: x + width * 0.22, y: y + height * 0.22 },
-    roofPeak: { x: x + width * 0.5, y: y + height * 0.08 },
-    roofRight: { x: x + width * 0.78, y: y + height * 0.22 },
-    doorwayCenter: { x: x + width * 0.5, y: y + height * 0.78 },
-    groundCenter: { x: x + width * 0.5, y: y + height },
-    trunkBase: { x: x + width * 0.5, y: y + height },
-    canopyCenter: { x: x + width * 0.5, y: y + height * 0.25 }
+    x: Math.round(box.x),
+    y: Math.round(box.y),
+    width: Math.max(1, Math.round(box.width)),
+    height: Math.max(1, Math.round(box.height))
   };
 }
 
-function pointInExpandedBox(
+function getCellSize(canvasWidth: number, canvasHeight: number) {
+  return {
+    width: canvasWidth / SEMANTIC_GRID_SIZE,
+    height: canvasHeight / SEMANTIC_GRID_SIZE
+  };
+}
+
+function gridColumnAt(index: number): SemanticGridColumn {
+  return semanticGridColumns[clamp(index, 0, SEMANTIC_GRID_SIZE - 1)];
+}
+
+function makeGridCell(column: SemanticGridColumn, row: number) {
+  return semanticGridCellSchema.parse([column, clamp(row, 1, 12)]);
+}
+
+function boxRight(box: ObjectBoundingBox) {
+  return box.x + box.width;
+}
+
+function boxBottom(box: ObjectBoundingBox) {
+  return box.y + box.height;
+}
+
+export function semanticGridCellLabel(cell: SemanticGridCell) {
+  return `${cell[0]}${cell[1]}`;
+}
+
+export function getHumanContextBoundingBox(item: PlannerHumanContext): ObjectBoundingBox {
+  if (item.kind === "humanStroke") {
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+
+    for (const [x, y] of item.points) {
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+
+    const padding = Math.max(2, item.size * 0.5);
+    return roundBox({
+      x: minX - padding,
+      y: minY - padding,
+      width: Math.max(1, maxX - minX + padding * 2),
+      height: Math.max(1, maxY - minY + padding * 2)
+    });
+  }
+
+  if (item.kind === "asciiBlock") {
+    const estimatedWidth = Math.max(
+      item.fontSize * 2.4,
+      item.text.length * item.fontSize * 0.56
+    );
+    const estimatedHeight = Math.max(item.fontSize, item.text.split("\n").length * item.fontSize);
+    return roundBox({
+      x: item.x,
+      y: item.y,
+      width: estimatedWidth,
+      height: estimatedHeight
+    });
+  }
+
+  return roundBox({
+    x: item.x - item.width * 0.5,
+    y: item.y - item.height * 0.5,
+    width: item.width,
+    height: item.height
+  });
+}
+
+export function getGridCellBounds(
+  cell: SemanticGridCell,
+  canvasWidth: number,
+  canvasHeight: number
+): ObjectBoundingBox {
+  const { width: cellWidth, height: cellHeight } = getCellSize(canvasWidth, canvasHeight);
+  const columnIndex = semanticGridColumns.indexOf(cell[0]);
+  const rowIndex = cell[1] - 1;
+
+  return roundBox({
+    x: columnIndex * cellWidth,
+    y: rowIndex * cellHeight,
+    width: cellWidth,
+    height: cellHeight
+  });
+}
+
+export function pointToGridCell(
   x: number,
   y: number,
-  bbox: ObjectBoundingBox,
-  marginX: number,
-  marginY: number
-) {
-  return (
-    x >= bbox.x - marginX &&
-    x <= bbox.x + bbox.width + marginX &&
-    y >= bbox.y - marginY &&
-    y <= bbox.y + bbox.height + marginY
-  );
+  canvasWidth: number,
+  canvasHeight: number
+): SemanticGridCell {
+  const { width: cellWidth, height: cellHeight } = getCellSize(canvasWidth, canvasHeight);
+  const columnIndex = clamp(Math.floor(x / cellWidth), 0, SEMANTIC_GRID_SIZE - 1);
+  const rowIndex = clamp(Math.floor(y / cellHeight), 0, SEMANTIC_GRID_SIZE - 1);
+  return makeGridCell(gridColumnAt(columnIndex), rowIndex + 1);
 }
 
-function collectContextPoints(subject: SceneSubject, humanContext: PlannerHumanContext[]) {
-  const marginX = subject.bbox.width * 0.14;
-  const marginY = subject.bbox.height * 0.14;
-  const points: AnchorPoint[] = [];
+export function gridCellsToBounds(
+  cells: SemanticGridCell[],
+  canvasWidth: number,
+  canvasHeight: number
+): ObjectBoundingBox {
+  const unique = dedupeGridCells(cells);
+  if (unique.length === 0) {
+    const cellWidth = canvasWidth / SEMANTIC_GRID_SIZE;
+    const cellHeight = canvasHeight / SEMANTIC_GRID_SIZE;
+    return roundBox({
+      x: canvasWidth * 0.5 - cellWidth * 0.5,
+      y: canvasHeight * 0.5 - cellHeight * 0.5,
+      width: cellWidth,
+      height: cellHeight
+    });
+  }
 
-  for (const item of humanContext) {
-    if (item.kind === "humanStroke") {
-      for (const [x, y] of item.points) {
-        if (pointInExpandedBox(x, y, subject.bbox, marginX, marginY)) {
-          points.push({ x, y });
-        }
-      }
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  for (const cell of unique) {
+    const bounds = getGridCellBounds(cell, canvasWidth, canvasHeight);
+    minX = Math.min(minX, bounds.x);
+    minY = Math.min(minY, bounds.y);
+    maxX = Math.max(maxX, boxRight(bounds));
+    maxY = Math.max(maxY, boxBottom(bounds));
+  }
+
+  return roundBox({
+    x: minX,
+    y: minY,
+    width: Math.max(1, maxX - minX),
+    height: Math.max(1, maxY - minY)
+  });
+}
+
+export function mapBoundsToGridCells(
+  bounds: ObjectBoundingBox,
+  canvasWidth: number,
+  canvasHeight: number
+): SemanticGridCell[] {
+  const { width: cellWidth, height: cellHeight } = getCellSize(canvasWidth, canvasHeight);
+  const left = clamp(Math.floor(bounds.x / cellWidth), 0, SEMANTIC_GRID_SIZE - 1);
+  const top = clamp(Math.floor(bounds.y / cellHeight), 0, SEMANTIC_GRID_SIZE - 1);
+  const right = clamp(
+    Math.floor((Math.max(bounds.x + bounds.width - 1, bounds.x)) / cellWidth),
+    0,
+    SEMANTIC_GRID_SIZE - 1
+  );
+  const bottom = clamp(
+    Math.floor((Math.max(bounds.y + bounds.height - 1, bounds.y)) / cellHeight),
+    0,
+    SEMANTIC_GRID_SIZE - 1
+  );
+
+  const cells: SemanticGridCell[] = [];
+  for (let column = left; column <= right; column += 1) {
+    for (let row = top; row <= bottom; row += 1) {
+      cells.push(makeGridCell(gridColumnAt(column), row + 1));
+    }
+  }
+
+  return cells;
+}
+
+export function dedupeGridCells(cells: SemanticGridCell[]) {
+  const seen = new Set<string>();
+  const deduped: SemanticGridCell[] = [];
+
+  for (const cell of cells) {
+    const key = semanticGridCellLabel(cell);
+    if (seen.has(key)) {
       continue;
     }
-
-    if (item.kind === "asciiBlock") {
-      if (pointInExpandedBox(item.x, item.y, subject.bbox, marginX, marginY)) {
-        points.push({ x: item.x, y: item.y });
-      }
-      continue;
-    }
-
-    const left = item.x - item.width * 0.5;
-    const right = item.x + item.width * 0.5;
-    const top = item.y - item.height * 0.5;
-    const bottom = item.y + item.height * 0.5;
-
-    if (
-      pointInExpandedBox(left, top, subject.bbox, marginX, marginY) ||
-      pointInExpandedBox(right, bottom, subject.bbox, marginX, marginY)
-    ) {
-      points.push(
-        { x: left, y: top },
-        { x: right, y: top },
-        { x: left, y: bottom },
-        { x: right, y: bottom }
-      );
-    }
+    seen.add(key);
+    deduped.push(cell);
   }
 
-  return points;
+  return deduped;
 }
 
-function averagePoint(points: AnchorPoint[], fallback: AnchorPoint): AnchorPoint {
-  if (points.length === 0) {
-    return fallback;
+export function summarizeHumanContextGrid(
+  humanDelta: PlannerHumanContext[],
+  canvasWidth: number,
+  canvasHeight: number
+): HumanContextGridSummary[] {
+  return humanDelta.map((item, index) => {
+    const bbox = getHumanContextBoundingBox(item);
+    const occupiedGridCells = mapBoundsToGridCells(bbox, canvasWidth, canvasHeight);
+    const label =
+      item.kind === "humanStroke"
+        ? `${item.tool} stroke ${index + 1}`
+        : item.kind === "asciiBlock"
+          ? `text block ${index + 1}`
+          : `${item.shape} shape ${index + 1}`;
+
+    return {
+      kind: item.kind,
+      label,
+      bbox,
+      occupiedGridCells
+    };
+  });
+}
+
+export function calculateUnitScale(
+  humanDelta: PlannerHumanContext[],
+  canvasWidth: number,
+  canvasHeight: number
+): UnitScale {
+  const boxes = humanDelta
+    .map((item) => getHumanContextBoundingBox(item))
+    .filter((box) => box.width > 0 && box.height > 0);
+
+  if (boxes.length === 0) {
+    const fallback = Math.min(canvasWidth, canvasHeight) / SEMANTIC_GRID_SIZE;
+    return {
+      averageWidth: fallback,
+      averageHeight: fallback,
+      unit: fallback,
+      sampleCount: 0
+    };
   }
 
-  const total = points.reduce(
-    (sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }),
-    { x: 0, y: 0 }
+  const totals = boxes.reduce(
+    (sum, box) => ({
+      width: sum.width + box.width,
+      height: sum.height + box.height
+    }),
+    { width: 0, height: 0 }
   );
 
-  return {
-    x: total.x / points.length,
-    y: total.y / points.length
-  };
-}
-
-function minBy(points: AnchorPoint[], selector: (point: AnchorPoint) => number) {
-  return points.reduce<AnchorPoint | null>((best, point) => {
-    if (!best || selector(point) < selector(best)) {
-      return point;
-    }
-    return best;
-  }, null);
-}
-
-function maxBy(points: AnchorPoint[], selector: (point: AnchorPoint) => number) {
-  return points.reduce<AnchorPoint | null>((best, point) => {
-    if (!best || selector(point) > selector(best)) {
-      return point;
-    }
-    return best;
-  }, null);
-}
-
-export function getSubjectAnchors(
-  subject: SceneSubject,
-  humanContext: PlannerHumanContext[]
-): SubjectAnchors {
-  const fallback = defaultAnchors(subject);
-  const points = collectContextPoints(subject, humanContext);
-  if (points.length < 6) {
-    return fallback;
-  }
-
-  const center = averagePoint(points, fallback.center);
-  const top = minBy(points, (point) => point.y) ?? fallback.top;
-  const bottom = maxBy(points, (point) => point.y) ?? fallback.bottom;
-  const left = minBy(points, (point) => point.x) ?? fallback.left;
-  const right = maxBy(points, (point) => point.x) ?? fallback.right;
-  const kind = normalizeSubjectKind(subject);
-
-  if (kind === "house") {
-    const roofBand = points.filter((point) => point.y <= subject.bbox.y + subject.bbox.height * 0.42);
-    const leftRoofBand = roofBand.filter((point) => point.x <= subject.bbox.x + subject.bbox.width * 0.48);
-    const rightRoofBand = roofBand.filter((point) => point.x >= subject.bbox.x + subject.bbox.width * 0.52);
-    const doorBand = points.filter(
-      (point) =>
-        point.y >= subject.bbox.y + subject.bbox.height * 0.58 &&
-        point.x >= subject.bbox.x + subject.bbox.width * 0.34 &&
-        point.x <= subject.bbox.x + subject.bbox.width * 0.66
-    );
-    const groundBand = points.filter((point) => point.y >= subject.bbox.y + subject.bbox.height * 0.86);
-
-    return {
-      ...fallback,
-      center,
-      top,
-      bottom,
-      left,
-      right,
-      roofPeak: minBy(roofBand, (point) => point.y) ?? fallback.roofPeak,
-      roofLeft: minBy(leftRoofBand, (point) => point.x) ?? fallback.roofLeft,
-      roofRight: maxBy(rightRoofBand, (point) => point.x) ?? fallback.roofRight,
-      doorwayCenter: averagePoint(doorBand, fallback.doorwayCenter),
-      groundCenter: averagePoint(groundBand, fallback.groundCenter),
-      trunkBase: averagePoint(groundBand, fallback.trunkBase),
-      canopyCenter: averagePoint(roofBand, fallback.canopyCenter)
-    };
-  }
-
-  if (kind === "tree") {
-    const canopyBand = points.filter((point) => point.y <= subject.bbox.y + subject.bbox.height * 0.46);
-    const trunkBand = points.filter(
-      (point) =>
-        point.y >= subject.bbox.y + subject.bbox.height * 0.42 &&
-        point.x >= subject.bbox.x + subject.bbox.width * 0.34 &&
-        point.x <= subject.bbox.x + subject.bbox.width * 0.66
-    );
-    const groundBand = points.filter((point) => point.y >= subject.bbox.y + subject.bbox.height * 0.86);
-
-    return {
-      ...fallback,
-      center,
-      top,
-      bottom,
-      left,
-      right,
-      roofPeak: minBy(canopyBand, (point) => point.y) ?? fallback.roofPeak,
-      roofLeft: minBy(canopyBand, (point) => point.x) ?? fallback.roofLeft,
-      roofRight: maxBy(canopyBand, (point) => point.x) ?? fallback.roofRight,
-      canopyCenter: averagePoint(canopyBand, fallback.canopyCenter),
-      trunkBase: averagePoint(groundBand.length > 0 ? groundBand : trunkBand, fallback.trunkBase),
-      groundCenter: averagePoint(groundBand, fallback.groundCenter),
-      doorwayCenter: averagePoint(trunkBand, fallback.doorwayCenter)
-    };
-  }
-
-  if (kind === "figure") {
-    const headBand = points.filter((point) => point.y <= subject.bbox.y + subject.bbox.height * 0.24);
-    const footBand = points.filter((point) => point.y >= subject.bbox.y + subject.bbox.height * 0.84);
-
-    return {
-      ...fallback,
-      center,
-      top,
-      bottom,
-      left,
-      right,
-      roofPeak: averagePoint(headBand, fallback.roofPeak),
-      groundCenter: averagePoint(footBand, fallback.groundCenter),
-      trunkBase: averagePoint(footBand, fallback.trunkBase),
-      canopyCenter: averagePoint(headBand, fallback.canopyCenter)
-    };
-  }
+  const averageWidth = totals.width / boxes.length;
+  const averageHeight = totals.height / boxes.length;
 
   return {
-    ...fallback,
-    center,
-    top,
-    bottom,
-    left,
-    right
+    averageWidth,
+    averageHeight,
+    unit: (averageWidth + averageHeight) * 0.5,
+    sampleCount: boxes.length
   };
 }
