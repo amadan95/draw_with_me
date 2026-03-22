@@ -126,8 +126,6 @@ export function DrawApp() {
     backgroundMode,
     currentStroke,
     turnState,
-    showThinkingPanel,
-    thinkingText,
     thinkingMessages,
     narration,
     aiSummary,
@@ -146,7 +144,6 @@ export function DrawApp() {
     clearThinkingMessages,
     setNarration,
     setAiSummary,
-    setShowThinkingPanel,
     setActiveCommentId,
     setUsage,
     beginStroke,
@@ -166,18 +163,6 @@ export function DrawApp() {
   } = useDrawStore();
 
   const palette = useMemo(() => getPalette(paletteIndex), [paletteIndex]);
-  const visibleHistory = useMemo(
-    () =>
-      turnHistory.filter(
-        (entry) =>
-          !(
-            entry.role === "user" &&
-            (entry.summary === "Added a freehand stroke." ||
-              entry.summary === "Erased part of the page.")
-          )
-      ),
-    [turnHistory]
-  );
   const isLoading =
     turnState === "awaitingModel" ||
     turnState === "modelStreaming" ||
@@ -600,36 +585,6 @@ export function DrawApp() {
             onCommentComposerClose={closeCommentComposer}
             onAskAiAboutComment={(commentId) => sendTurn(commentId)}
           />
-
-          {showThinkingPanel ? (
-            <aside className="draw-thinking-float">
-              <div className="draw-thinking-float-head">
-                <span>thinking</span>
-                <button
-                  type="button"
-                  className="draw-inline-close"
-                  onClick={() => setShowThinkingPanel(false)}
-                >
-                  hide
-                </button>
-              </div>
-              <p className="draw-thinking-float-text">
-                {thinkingText ||
-                  "When the model streams, its planning text appears here before marks land on the page."}
-              </p>
-              <div className="draw-thinking-float-history">
-                {visibleHistory.slice(-3).map((entry) => (
-                  <div
-                    key={entry.id}
-                    className={`draw-history-item draw-history-item--${entry.role}`}
-                  >
-                    <strong>{entry.role === "ai" ? "AI" : "You"}</strong>
-                    <p>{entry.summary}</p>
-                  </div>
-                ))}
-              </div>
-            </aside>
-          ) : null}
 
           {settingsOpen ? (
             <div className="draw-settings-popover">
