@@ -26,6 +26,7 @@ import {
   type Viewport,
   worldToScreen
 } from "@/lib/draw-utils";
+import { PenCursorIcon } from "@/components/draw/pen-cursor-icon";
 
 export type DrawCanvasHandle = {
   captureSnapshot: (options?: {
@@ -55,6 +56,7 @@ type DrawCanvasProps = {
       }
     | null;
   tool: ToolMode;
+  strokeColor: string;
   backgroundMode: "dots" | "grid";
   loading: boolean;
   narration: string;
@@ -97,6 +99,7 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
       activeCommentId,
       commentComposer,
       tool,
+      strokeColor,
       backgroundMode,
       loading,
       narration,
@@ -510,7 +513,9 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
     return (
       <div
         ref={containerRef}
-        className="draw-canvas-container"
+        className={`draw-canvas-container${
+          tool === "draw" ? " draw-canvas-container--pen-cursor" : ""
+        }`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -614,12 +619,12 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
           ) : null}
         </div>
 
-        {cursorPoint ? (
+        {cursorPoint && tool === "draw" ? (
           <div
-            className={`draw-cursor draw-cursor--${tool}`}
+            className="draw-pen-cursor"
             style={{ left: cursorPoint.x, top: cursorPoint.y }}
           >
-            <span>{tool === "ascii" ? "::*" : tool === "comment" ? "pin" : tool}</span>
+            <PenCursorIcon style={{ color: strokeColor }} className="draw-pen-cursor__icon" />
           </div>
         ) : null}
 

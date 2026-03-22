@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none">
+  <defs>
+    <linearGradient id="eraserTop" x1="39" y1="18" x2="80" y2="61" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFDF6"/>
+      <stop offset="0.65" stop-color="#FBF1E2"/>
+      <stop offset="1" stop-color="#E8DCCA"/>
+    </linearGradient>
+    <linearGradient id="eraserBand" x1="36" y1="52" x2="92" y2="88" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8AB8FF"/>
+      <stop offset="1" stop-color="#5A8EF4"/>
+    </linearGradient>
+    <linearGradient id="eraserBottom" x1="52" y1="75" x2="88" y2="108" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FAF4EA"/>
+      <stop offset="1" stop-color="#DDD2C2"/>
+    </linearGradient>
+  </defs>
+  <g transform="rotate(45 64 64)">
+    <rect x="37" y="14" width="54" height="48" rx="15" fill="url(#eraserTop)"/>
+    <rect x="37" y="47" width="54" height="30" rx="0" fill="url(#eraserBand)"/>
+    <rect x="37" y="77" width="54" height="24" rx="12" fill="url(#eraserBottom)"/>
+    <path d="M47 20C55 17 73 19 83 33" stroke="#FFFFFF" stroke-opacity="0.7" stroke-width="4.5" stroke-linecap="round"/>
+    <path d="M44 82C52 90 64 96 79 95" stroke="#FFFFFF" stroke-opacity="0.34" stroke-width="5.5" stroke-linecap="round"/>
+    <path d="M38.5 57C49 63 80 63 90.5 57" stroke="#8FC1FF" stroke-opacity="0.45" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M37 76H91" stroke="#6A9BFB" stroke-opacity="0.24" stroke-width="2"/>
+  </g>
+</svg>

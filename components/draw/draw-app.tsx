@@ -1,12 +1,11 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import { Settings, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AuthControls } from "@/components/draw/auth-controls";
 import { DrawCanvas, type DrawCanvasHandle } from "@/components/draw/draw-canvas";
 import { Header } from "@/components/draw/header";
-import { TextCursorIcon } from "@/components/draw/text-cursor-icon";
 import { useDrawStore } from "@/lib/draw-store";
 import {
   type DrawStreamEvent,
@@ -31,7 +30,6 @@ export function DrawApp() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [usageBanner, setUsageBanner] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-
   const auth = hasClerk ? useAuth() : null;
   const isSignedIn = auth?.isSignedIn ?? false;
 
@@ -327,13 +325,33 @@ export function DrawApp() {
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.code !== "Space" || event.repeat || isTextInput(event.target)) {
+      if (isTextInput(event.target)) {
         return;
       }
 
-      event.preventDefault();
-      if (!isLoading) {
-        void sendTurn();
+      if (event.code === "Space") {
+        if (!event.repeat) {
+          event.preventDefault();
+          if (!isLoading) {
+            void sendTurn();
+          }
+        }
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      if (key === "p") {
+        setTool("draw");
+        setStrokeSize(3);
+      } else if (key === "b") {
+        setTool("draw");
+        setStrokeSize(Math.max(6, strokeSize));
+      } else if (key === "e") {
+        setTool("erase");
+      } else if (key === "t") {
+        setTool("ascii");
+      } else if (key === "c") {
+        setTool("comment");
       }
     };
 
@@ -349,7 +367,7 @@ export function DrawApp() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keydown", handleEscape);
     };
-  }, [isLoading, sendTurn]);
+  }, [isLoading, sendTurn, setStrokeSize, setTool, strokeSize]);
 
   const stopTurn = () => {
     abortRef.current?.abort();
@@ -377,6 +395,8 @@ export function DrawApp() {
             thinkingMessages={thinkingMessages}
             aiSummary={aiSummary}
             setAiSummary={setAiSummary}
+            onToggleSettings={() => setSettingsOpen((open) => !open)}
+            settingsOpen={settingsOpen}
             onBack={() => {
               window.location.href = "/";
             }}
@@ -399,6 +419,7 @@ export function DrawApp() {
             activeCommentId={activeCommentId}
             commentComposer={commentComposer}
             tool={tool}
+            strokeColor={strokeColor}
             backgroundMode={backgroundMode}
             loading={isLoading}
             narration={narration}
@@ -448,9 +469,8 @@ export function DrawApp() {
             </aside>
           ) : null}
 
-          <div className="draw-dock">
-            {settingsOpen ? (
-              <div className="draw-settings-popover">
+          {settingsOpen ? (
+            <div className="draw-settings-popover">
                 <div className="draw-settings-popover__head">
                   <strong>Generation</strong>
                   <button
@@ -496,43 +516,51 @@ export function DrawApp() {
                     }
                   />
                 </label>
-              </div>
-            ) : null}
+            </div>
+          ) : null}
 
+          <div className="draw-dock">
             <div className="draw-dock-top">
               <div className="draw-tool-cluster">
-                {(["draw", "erase", "ascii", "comment"] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    className={`draw-dock-tool${tool === mode ? " is-active" : ""}`}
-                    type="button"
-                    onClick={() => setTool(mode)}
-                    aria-label={mode}
-                    title={mode}
-                  >
-                    {mode === "draw" ? (
-                      <span className="draw-tool-pencil" aria-hidden="true">
-                        <span className="draw-tool-pencil-tip" />
-                        <span className="draw-tool-pencil-body" />
-                        <span className="draw-tool-pencil-band" />
-                      </span>
-                    ) : null}
-                    {mode === "erase" ? (
-                      <span className="draw-tool-eraser" aria-hidden="true">
-                        <span className="draw-tool-eraser-head" />
-                        <span className="draw-tool-eraser-base" />
-                      </span>
-                    ) : null}
-                    {mode === "ascii" ? (
-                      <TextCursorIcon className="h-[18px] w-[18px] text-[rgba(38,37,35,0.7)]" />
-                    ) : null}
-                    {mode === "comment" ? (
-                      <span className="draw-tool-comment" aria-hidden="true">
-                        ⌁
-                      </span>
-                    ) : null}
-                  </button>
-                ))}
+                <button
+                  className={`draw-dock-tool draw-dock-tool--pencil${
+                    tool === "draw" ? " is-active" : ""
+                  }`}
+                  type="button"
+                  onClick={() => {
+                    setTool("draw");
+                    setStrokeSize(3);
+                  }}
+                  aria-label="Pencil tool"
+                  title="Pencil tool"
+                >
+                  <span className="draw-tool-sticker" aria-hidden="true">
+                    <img
+                      className="draw-tool-sticker__asset draw-tool-sticker__asset--pencil"
+                      src="/toolbar-pencil.svg"
+                      alt=""
+                    />
+                  </span>
+                </button>
+                <button
+                  className={`draw-dock-tool draw-dock-tool--eraser${
+                    tool === "erase" ? " is-active" : ""
+                  }`}
+                  type="button"
+                  onClick={() => {
+                    setTool("erase");
+                  }}
+                  aria-label="Eraser tool"
+                  title="Eraser tool"
+                >
+                  <span className="draw-tool-sticker draw-tool-sticker--eraser" aria-hidden="true">
+                    <img
+                      className="draw-tool-sticker__asset draw-tool-sticker__asset--eraser"
+                      src="/toolbar-eraser.svg"
+                      alt=""
+                    />
+                  </span>
+                </button>
               </div>
 
               <div className="draw-dock-divider" aria-hidden="true" />
@@ -552,7 +580,13 @@ export function DrawApp() {
               </div>
 
               <button className="draw-dice-button" type="button" onClick={cyclePalette}>
-                <span aria-hidden="true">⚄</span>
+                <span className="draw-tool-sticker draw-tool-sticker--dice" aria-hidden="true">
+                  <img
+                    className="draw-tool-sticker__asset draw-tool-sticker__asset--dice"
+                    src="/toolbar-dice.svg"
+                    alt=""
+                  />
+                </span>
               </button>
 
               <div className="draw-dock-divider" aria-hidden="true" />
@@ -585,20 +619,12 @@ export function DrawApp() {
                 type="button"
                 disabled={false}
                 onClick={handlePrimaryAction}
+                aria-keyshortcuts="Space"
               >
                 <span className="draw-send-button__icon" aria-hidden="true">
                   <Sparkles size={20} strokeWidth={2.2} />
                 </span>
                 <strong>{isLoading ? "Thinking..." : "Send to Gemini"}</strong>
-                <em>{isLoading ? "Wait" : "Space"}</em>
-              </button>
-              <button
-                className="draw-dock-settings-button"
-                type="button"
-                onClick={() => setSettingsOpen((open) => !open)}
-                aria-label="Open settings"
-              >
-                <Settings size={24} strokeWidth={2.2} />
               </button>
             </div>
           </div>

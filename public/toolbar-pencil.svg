@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none">
+  <defs>
+    <linearGradient id="pencilBody" x1="55" y1="22" x2="90" y2="92" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFD56E"/>
+      <stop offset="0.6" stop-color="#FFBA43"/>
+      <stop offset="1" stop-color="#E28A18"/>
+    </linearGradient>
+    <linearGradient id="pencilSide" x1="74" y1="32" x2="98" y2="87" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFB74B"/>
+      <stop offset="1" stop-color="#D57B13"/>
+    </linearGradient>
+    <linearGradient id="pencilTop" x1="31" y1="67" x2="52" y2="92" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFE4C9"/>
+      <stop offset="1" stop-color="#F6BF8B"/>
+    </linearGradient>
+    <linearGradient id="eraserCap" x1="92" y1="18" x2="106" y2="37" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFB196"/>
+      <stop offset="1" stop-color="#D97B5D"/>
+    </linearGradient>
+  </defs>
+  <g transform="rotate(-45 64 64)">
+    <rect x="43" y="18" width="48" height="76" rx="14" fill="url(#pencilBody)"/>
+    <path d="M70 18H91V79C91 86.732 84.732 93 77 93H70V18Z" fill="url(#pencilSide)"/>
+    <path d="M43 79H91L68.5 108C66.3 110.84 62.03 110.84 59.83 108L43 79Z" fill="url(#pencilTop)"/>
+    <path d="M43 79H70L59.5 108.5C58.27 111.96 53.63 112.61 51.49 109.62L43 79Z" fill="#FCE7D4" fill-opacity="0.92"/>
+    <path d="M55.5 101.5L61.6 94.2C63.18 92.31 66.09 92.59 67.3 94.74L69.8 99.2C70.93 101.2 69.49 103.7 67.19 103.7H57.8C55.69 103.7 54.14 103.15 55.5 101.5Z" fill="#2E2A34"/>
+    <rect x="43" y="4" width="48" height="21" rx="11" fill="url(#eraserCap)"/>
+    <path d="M47 26.5C56 30 77 30 87 26.5" stroke="#FFF3E6" stroke-opacity="0.9" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M61 21L76 21" stroke="#FFE9D2" stroke-opacity="0.9" stroke-width="3.4" stroke-linecap="round"/>
+    <path d="M58 34C58 29.5 60.8 22.8 64 20.5" stroke="#FFF6E9" stroke-opacity="0.7" stroke-width="2.8" stroke-linecap="round"/>
+  </g>
+</svg>

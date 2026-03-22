@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   Download,
   Loader2,
+  Settings2,
   Smile,
   Trash2
 } from "lucide-react";
@@ -27,6 +28,8 @@ type HeaderProps = {
   thinkingMessages: string[];
   aiSummary: string | null;
   setAiSummary: (value: string | null) => void;
+  onToggleSettings?: () => void;
+  settingsOpen?: boolean;
   onBack?: () => void;
 };
 
@@ -36,6 +39,8 @@ export function Header({
   thinkingMessages,
   aiSummary,
   setAiSummary,
+  onToggleSettings,
+  settingsOpen = false,
   onBack
 }: HeaderProps) {
   const [fallbackIndex, setFallbackIndex] = useState(0);
@@ -157,6 +162,17 @@ export function Header({
           >
             <Download className="draw-app-header__icon" strokeWidth={2.1} />
           </button>
+          {onToggleSettings ? (
+            <button
+              className={`draw-app-header__button${settingsOpen ? " is-active" : ""}`}
+              type="button"
+              onClick={onToggleSettings}
+              title="Settings"
+              aria-label="Settings"
+            >
+              <Settings2 className="draw-app-header__icon" strokeWidth={2.1} />
+            </button>
+          ) : null}
         </div>
       </div>
     </motion.header>
