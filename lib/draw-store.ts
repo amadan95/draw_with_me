@@ -3,21 +3,24 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import {
-  type AsciiBlock,
+  type AiCursorPresence,
   type CanvasBackground,
-  type CommentPin,
-  type DrawingElement,
+  type CommentThread,
+  type DrawTurnHistory,
+  type DrawingSyncState,
   type HumanStroke,
-  type Palette,
+  type InteractionStyle,
+  type PersistedAsciiBlock,
+  type PersistedShapeElement,
   type Point,
+  type SessionUsage,
+  type SpeechDraft,
   type ToolMode,
   type TurnState,
-  type TurnSummary,
   createId,
   getPalette
 } from "@/lib/draw-types";
-
-const PAPER_COLOR = "#faf9f7";
+import { createAiHistoryEntry, createHumanHistoryEntry } from "@/lib/draw/history";
 
 type CommentComposer = {
   x: number;
@@ -25,15 +28,25 @@ type CommentComposer = {
   text: string;
 } | null;
 
-type UsageState = {
-  used: number;
-  limit: number;
-} | null;
+type BoardSnapshot = {
+  humanStrokes: HumanStroke[];
+  drawingElements: PersistedShapeElement[];
+  asciiBlocks: PersistedAsciiBlock[];
+  comments: CommentThread[];
+};
 
 type DrawStore = {
-  elements: DrawingElement[];
-  comments: CommentPin[];
-  turnHistory: TurnSummary[];
+  humanStrokes: HumanStroke[];
+  currentStroke: HumanStroke | null;
+  drawingElements: PersistedShapeElement[];
+  asciiBlocks: PersistedAsciiBlock[];
+  comments: CommentThread[];
+  undoStack: BoardSnapshot[];
+  redoStack: BoardSnapshot[];
+  lastTurnElements: string[];
+  turnState: TurnState;
+  turnHistory: DrawTurnHistory[];
+  turnCount: number;
   tool: ToolMode;
   strokeSize: number;
   paletteIndex: number;
@@ -41,19 +54,25 @@ type DrawStore = {
   aiTemperature: number;
   aiMaxOutputTokens: number;
   backgroundMode: CanvasBackground;
-  turnState: TurnState;
-  currentStroke: HumanStroke | null;
-  currentAsciiGhost: { x: number; y: number } | null;
   showThinkingPanel: boolean;
   thinkingText: string;
-  thinkingMessages: string[];
   narration: string;
+  previewSaw: string;
+  previewDrawing: string;
   aiSummary: string | null;
   exportOpen: boolean;
   activeCommentId: string | null;
   commentComposer: CommentComposer;
-  lastAiElementIndex: number;
-  usage: UsageState;
+  sessionUsage: SessionUsage | null;
+  interactionStyle: InteractionStyle;
+  aiCursor: AiCursorPresence;
+  speechDraft: SpeechDraft | null;
+  lastSyncedState: DrawingSyncState | null;
+  aiSource: "gemini" | "fallback-provider-error" | "fallback-parse-error" | null;
+  debugInfo: {
+    hasFocusImage: boolean;
+    turnMode: "turn" | "comment" | null;
+  };
   setTool: (tool: ToolMode) => void;
   setStrokeSize: (size: number) => void;
   setPaletteIndex: (index: number) => void;
@@ -62,68 +81,136 @@ type DrawStore = {
   setAiMaxOutputTokens: (value: number) => void;
   cyclePalette: () => void;
   setBackgroundMode: (mode: CanvasBackground) => void;
-  setTurnState: (state: TurnState) => void;
+  setShowThinkingPanel: (open: boolean) => void;
   setThinkingText: (text: string) => void;
-  clearThinkingMessages: () => void;
   setNarration: (text: string) => void;
+  setPreviewSaw: (text: string) => void;
+  setPreviewDrawing: (text: string) => void;
   setAiSummary: (text: string | null) => void;
   setExportOpen: (open: boolean) => void;
-  setShowThinkingPanel: (open: boolean) => void;
   setActiveCommentId: (id: string | null) => void;
-  setUsage: (usage: UsageState) => void;
+  setSessionUsage: (usage: SessionUsage | null) => void;
+  setInteractionStyle: (style: InteractionStyle) => void;
+  setAiCursor: (cursor: Partial<AiCursorPresence>) => void;
+  clearAiCursor: () => void;
+  setSpeechDraft: (draft: SpeechDraft | null) => void;
+  appendSpeechDraft: (chunk: string) => void;
+  clearSpeechDraft: () => void;
+  setAiSource: (source: "gemini" | "fallback-provider-error" | "fallback-parse-error" | null) => void;
+  setDebugInfo: (info: { hasFocusImage: boolean; turnMode: "turn" | "comment" | null }) => void;
   beginStroke: (point: Point) => void;
   appendStrokePoint: (point: Point) => void;
   commitStroke: () => HumanStroke | null;
   cancelStroke: () => void;
-  setAsciiGhost: (ghost: { x: number; y: number } | null) => void;
-  stampAscii: (point: Point, text?: string) => AsciiBlock;
+  stampAscii: (point: Point, text?: string) => PersistedAsciiBlock;
   openCommentComposer: (x: number, y: number) => void;
   updateCommentComposer: (text: string) => void;
   closeCommentComposer: () => void;
-  submitCommentComposer: () => CommentPin | null;
+  submitCommentComposer: () => CommentThread | null;
   appendCommentReply: (commentId: string, text: string) => void;
-  addAiElement: (element: DrawingElement) => void;
-  addHistoryEntry: (entry: TurnSummary) => void;
-  checkpointAiState: () => void;
+  dismissCommentThread: (threadId?: string) => void;
+  beginModelRequest: () => void;
+  beginModelStreaming: () => void;
+  beginModelAnimating: () => void;
+  completeModelTurn: (
+    summary?: string | null,
+    options?: { incrementTurnCount?: boolean }
+  ) => void;
+  failTurn: () => void;
+  addHistoryEntry: (entry: DrawTurnHistory) => void;
+  commitAiShape: (element: PersistedShapeElement) => void;
+  commitAiBlock: (block: PersistedAsciiBlock) => void;
+  markSyncedState: (state: DrawingSyncState) => void;
   clearBoard: () => void;
+  undo: () => void;
+  redo: () => void;
+};
+
+const initialCursor: AiCursorPresence = {
+  visible: false,
+  phase: "idle",
+  x: 0,
+  y: 0
 };
 
 const initialState = {
-  elements: [] as DrawingElement[],
-  comments: [] as CommentPin[],
-  turnHistory: [] as TurnSummary[],
+  humanStrokes: [] as HumanStroke[],
+  currentStroke: null as HumanStroke | null,
+  drawingElements: [] as PersistedShapeElement[],
+  asciiBlocks: [] as PersistedAsciiBlock[],
+  comments: [] as CommentThread[],
+  undoStack: [] as BoardSnapshot[],
+  redoStack: [] as BoardSnapshot[],
+  lastTurnElements: [] as string[],
+  turnState: "idle" as TurnState,
+  turnHistory: [] as DrawTurnHistory[],
+  turnCount: 0,
   tool: "draw" as ToolMode,
   strokeSize: 6,
   paletteIndex: 0,
   strokeColor: getPalette(0)[0],
-  aiTemperature: 0.22,
-  aiMaxOutputTokens: 4096,
+  aiTemperature: 0.34,
+  aiMaxOutputTokens: 3072,
   backgroundMode: "dots" as CanvasBackground,
-  turnState: "idle" as TurnState,
-  currentStroke: null as HumanStroke | null,
-  currentAsciiGhost: null as { x: number; y: number } | null,
   showThinkingPanel: true,
   thinkingText: "",
-  thinkingMessages: [] as string[],
   narration: "",
+  previewSaw: "",
+  previewDrawing: "",
   aiSummary: null as string | null,
   exportOpen: false,
   activeCommentId: null as string | null,
   commentComposer: null as CommentComposer,
-  lastAiElementIndex: 0,
-  usage: null as UsageState
+  sessionUsage: null as SessionUsage | null,
+  interactionStyle: "collaborative" as InteractionStyle,
+  aiCursor: initialCursor,
+  speechDraft: null as SpeechDraft | null,
+  lastSyncedState: null as DrawingSyncState | null,
+  aiSource: null as "gemini" | "fallback-provider-error" | "fallback-parse-error" | null,
+  debugInfo: {
+    hasFocusImage: false,
+    turnMode: null as "turn" | "comment" | null
+  }
 };
+
+function cloneValue<T>(value: T): T {
+  if (typeof structuredClone === "function") {
+    return structuredClone(value);
+  }
+
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function snapshotBoard(state: Pick<
+  DrawStore,
+  "humanStrokes" | "drawingElements" | "asciiBlocks" | "comments"
+>): BoardSnapshot {
+  return cloneValue({
+    humanStrokes: state.humanStrokes,
+    drawingElements: state.drawingElements,
+    asciiBlocks: state.asciiBlocks,
+    comments: state.comments
+  });
+}
+
+function applyBoardSnapshot(snapshot: BoardSnapshot) {
+  return {
+    humanStrokes: snapshot.humanStrokes,
+    drawingElements: snapshot.drawingElements,
+    asciiBlocks: snapshot.asciiBlocks,
+    comments: snapshot.comments
+  };
+}
+
+function pushUndo(state: DrawStore) {
+  return [...state.undoStack.slice(-39), snapshotBoard(state)];
+}
 
 export const useDrawStore = create<DrawStore>()(
   persist(
     (set, get) => ({
       ...initialState,
-      setTool: (tool) =>
-        set({
-          tool,
-          currentAsciiGhost: null,
-          commentComposer: tool === "comment" ? get().commentComposer : null
-        }),
+      setTool: (tool) => set({ tool }),
       setStrokeSize: (strokeSize) => set({ strokeSize }),
       setPaletteIndex: (paletteIndex) =>
         set({
@@ -132,11 +219,13 @@ export const useDrawStore = create<DrawStore>()(
         }),
       setStrokeColor: (strokeColor) => set({ strokeColor }),
       setAiTemperature: (aiTemperature) =>
-        set({ aiTemperature: Math.min(1, Math.max(0, aiTemperature)) }),
+        set({
+          aiTemperature: Math.min(1, Math.max(0, aiTemperature))
+        }),
       setAiMaxOutputTokens: (aiMaxOutputTokens) =>
         set({
           aiMaxOutputTokens: Math.round(
-            Math.min(8192, Math.max(512, aiMaxOutputTokens))
+            Math.min(8192, Math.max(256, aiMaxOutputTokens))
           )
         }),
       cyclePalette: () =>
@@ -148,34 +237,40 @@ export const useDrawStore = create<DrawStore>()(
           };
         }),
       setBackgroundMode: (backgroundMode) => set({ backgroundMode }),
-      setTurnState: (turnState) => set({ turnState }),
-      setThinkingText: (thinkingText) =>
-        set((state) => ({
-          thinkingText,
-          thinkingMessages:
-            thinkingText && state.thinkingMessages[state.thinkingMessages.length - 1] !== thinkingText
-              ? [...state.thinkingMessages, thinkingText].slice(-12)
-              : state.thinkingMessages
-        })),
-      clearThinkingMessages: () =>
-        set({
-          thinkingText: "",
-          thinkingMessages: []
-        }),
-      setNarration: (narration) =>
-        set({
-          narration,
-          aiSummary: narration || null
-        }),
-      setAiSummary: (aiSummary) =>
-        set({
-          aiSummary,
-          narration: aiSummary ?? ""
-        }),
-      setExportOpen: (exportOpen) => set({ exportOpen }),
       setShowThinkingPanel: (showThinkingPanel) => set({ showThinkingPanel }),
+      setThinkingText: (thinkingText) => set({ thinkingText }),
+      setNarration: (narration) => set({ narration }),
+      setPreviewSaw: (previewSaw) => set({ previewSaw }),
+      setPreviewDrawing: (previewDrawing) => set({ previewDrawing }),
+      setAiSummary: (aiSummary) => set({ aiSummary }),
+      setExportOpen: (exportOpen) => set({ exportOpen }),
       setActiveCommentId: (activeCommentId) => set({ activeCommentId }),
-      setUsage: (usage) => set({ usage }),
+      setSessionUsage: (sessionUsage) => set({ sessionUsage }),
+      setInteractionStyle: (interactionStyle) => set({ interactionStyle }),
+      setAiCursor: (cursor) =>
+        set((state) => ({
+          aiCursor: {
+            ...state.aiCursor,
+            ...cursor,
+            visible: cursor.visible ?? true
+          }
+        })),
+      clearAiCursor: () => set({ aiCursor: initialCursor }),
+      setSpeechDraft: (speechDraft) => set({ speechDraft }),
+      appendSpeechDraft: (chunk) =>
+        set((state) => ({
+          speechDraft: state.speechDraft
+            ? {
+                ...state.speechDraft,
+                text: `${state.speechDraft.text}${chunk}`.trimStart()
+              }
+            : {
+                text: chunk
+              }
+        })),
+      clearSpeechDraft: () => set({ speechDraft: null }),
+      setAiSource: (aiSource) => set({ aiSource }),
+      setDebugInfo: (debugInfo) => set({ debugInfo }),
       beginStroke: (point) => {
         const { tool, strokeSize, strokeColor } = get();
         if (tool !== "draw" && tool !== "erase") {
@@ -188,49 +283,60 @@ export const useDrawStore = create<DrawStore>()(
             createdAt: Date.now(),
             kind: "humanStroke",
             tool,
-            color: tool === "erase" ? PAPER_COLOR : strokeColor,
+            color: tool === "erase" ? "#000000" : strokeColor,
             size: strokeSize,
             points: [point]
           },
           turnState: "humanDrawing"
         });
       },
-      appendStrokePoint: (point) => {
-        const current = get().currentStroke;
-        if (!current) {
-          return;
-        }
-
-        set({
-          currentStroke: {
-            ...current,
-            points: [...current.points, point]
-          }
-        });
-      },
+      appendStrokePoint: (point) =>
+        set((state) => ({
+          currentStroke: state.currentStroke
+            ? {
+                ...state.currentStroke,
+                points: [...state.currentStroke.points, point]
+              }
+            : null
+        })),
       commitStroke: () => {
         const current = get().currentStroke;
         if (!current || current.points.length < 2) {
-          set({ currentStroke: null, turnState: "idle" });
+          set({
+            currentStroke: null,
+            turnState: "idle"
+          });
           return null;
         }
 
         set((state) => ({
-          elements: [...state.elements, current],
+          humanStrokes: [...state.humanStrokes, current],
           currentStroke: null,
+          undoStack: pushUndo(state),
+          redoStack: [],
+          turnHistory: [
+            ...state.turnHistory,
+            createHumanHistoryEntry(
+              current.tool === "erase" ? "Erased part of the page." : "Drew a freehand stroke."
+            )
+          ],
           turnState: "idle"
         }));
 
         return current;
       },
-      cancelStroke: () => set({ currentStroke: null, turnState: "idle" }),
-      setAsciiGhost: (currentAsciiGhost) => set({ currentAsciiGhost }),
+      cancelStroke: () =>
+        set({
+          currentStroke: null,
+          turnState: "idle"
+        }),
       stampAscii: (point, text = "::*") => {
         const { strokeColor } = get();
-        const block: AsciiBlock = {
+        const block: PersistedAsciiBlock = {
           id: createId("ascii"),
           createdAt: Date.now(),
           kind: "asciiBlock",
+          source: "human",
           x: point.x,
           y: point.y,
           color: strokeColor,
@@ -239,15 +345,12 @@ export const useDrawStore = create<DrawStore>()(
         };
 
         set((state) => ({
-          elements: [...state.elements, block],
+          asciiBlocks: [...state.asciiBlocks, block],
+          undoStack: pushUndo(state),
+          redoStack: [],
           turnHistory: [
             ...state.turnHistory,
-            {
-              id: createId("turn"),
-              role: "user",
-              summary: "Stamped an ASCII cluster.",
-              createdAt: Date.now()
-            }
+            createHumanHistoryEntry("Placed an ASCII block.")
           ],
           turnState: "idle"
         }));
@@ -257,13 +360,16 @@ export const useDrawStore = create<DrawStore>()(
       openCommentComposer: (x, y) =>
         set({
           commentComposer: { x, y, text: "" },
-          turnState: "commenting",
-          activeCommentId: null
+          activeCommentId: null,
+          turnState: "commenting"
         }),
       updateCommentComposer: (text) =>
         set((state) => ({
           commentComposer: state.commentComposer
-            ? { ...state.commentComposer, text }
+            ? {
+                ...state.commentComposer,
+                text
+              }
             : null
         })),
       closeCommentComposer: () =>
@@ -274,11 +380,14 @@ export const useDrawStore = create<DrawStore>()(
       submitCommentComposer: () => {
         const composer = get().commentComposer;
         if (!composer || !composer.text.trim()) {
-          set({ commentComposer: null, turnState: "idle" });
+          set({
+            commentComposer: null,
+            turnState: "idle"
+          });
           return null;
         }
 
-        const comment: CommentPin = {
+        const comment: CommentThread = {
           id: createId("comment"),
           x: composer.x,
           y: composer.y,
@@ -298,17 +407,14 @@ export const useDrawStore = create<DrawStore>()(
         set((state) => ({
           comments: [...state.comments, comment],
           commentComposer: null,
-          turnState: "idle",
           activeCommentId: comment.id,
+          undoStack: pushUndo(state),
+          redoStack: [],
           turnHistory: [
             ...state.turnHistory,
-            {
-              id: createId("turn"),
-              role: "user",
-              summary: "Pinned a comment on the canvas.",
-              createdAt: Date.now()
-            }
-          ]
+            createHumanHistoryEntry("Pinned a comment on the canvas.")
+          ],
+          turnState: "idle"
         }));
 
         return comment;
@@ -332,56 +438,162 @@ export const useDrawStore = create<DrawStore>()(
               : comment
           )
         })),
-      addAiElement: (element) =>
+      dismissCommentThread: (threadId) =>
         set((state) => ({
-          elements: [...state.elements, element]
+          activeCommentId:
+            !threadId || state.activeCommentId === threadId ? null : state.activeCommentId,
+          comments: threadId
+            ? state.comments.map((comment) =>
+                comment.id === threadId
+                  ? {
+                      ...comment,
+                      status: "resolved"
+                    }
+                  : comment
+              )
+            : state.comments
         })),
+      beginModelRequest: () =>
+        set({
+          turnState: "awaitingModel",
+          thinkingText: "",
+          narration: "",
+          previewSaw: "",
+          previewDrawing: "",
+          aiSummary: null,
+          speechDraft: null,
+          lastTurnElements: [],
+          aiSource: null,
+          debugInfo: {
+            hasFocusImage: false,
+            turnMode: null
+          }
+        }),
+      beginModelStreaming: () =>
+        set({
+          turnState: "modelStreaming"
+        }),
+      beginModelAnimating: () =>
+        set({
+          turnState: "modelAnimating"
+        }),
+      completeModelTurn: (summary, options) =>
+        set((state) => ({
+          turnState: "idle",
+          aiSummary: summary ?? state.aiSummary,
+          turnCount:
+            options?.incrementTurnCount === false
+              ? state.turnCount
+              : state.turnCount + 1
+        })),
+      failTurn: () =>
+        set({
+          turnState: "error"
+        }),
       addHistoryEntry: (entry) =>
         set((state) => ({
           turnHistory: [...state.turnHistory, entry]
         })),
-      checkpointAiState: () =>
+      commitAiShape: (element) =>
         set((state) => ({
-          lastAiElementIndex: state.elements.length
+          drawingElements: [...state.drawingElements, element],
+          lastTurnElements: [...state.lastTurnElements, element.id]
         })),
+      commitAiBlock: (block) =>
+        set((state) => ({
+          asciiBlocks: [...state.asciiBlocks, block],
+          lastTurnElements: [...state.lastTurnElements, block.id]
+        })),
+      markSyncedState: (lastSyncedState) => set({ lastSyncedState }),
       clearBoard: () =>
         set({
-          elements: [],
-          comments: [],
-          turnHistory: [],
+          ...initialState,
+          strokeColor: getPalette(get().paletteIndex)[0],
+          paletteIndex: get().paletteIndex,
+          aiTemperature: get().aiTemperature,
+          aiMaxOutputTokens: get().aiMaxOutputTokens,
+          backgroundMode: get().backgroundMode
+        }),
+      undo: () => {
+        const state = get();
+        const snapshot = state.undoStack[state.undoStack.length - 1];
+        if (!snapshot) {
+          return;
+        }
+
+        set({
+          ...applyBoardSnapshot(snapshot),
+          undoStack: state.undoStack.slice(0, -1),
+          redoStack: [...state.redoStack, snapshotBoard(state)],
           currentStroke: null,
-          currentAsciiGhost: null,
-          commentComposer: null,
-          activeCommentId: null,
-          narration: "",
-          aiSummary: null,
-          thinkingText: "",
-          thinkingMessages: [],
-          turnState: "idle",
-          lastAiElementIndex: 0
-        })
+          turnState: "idle"
+        });
+      },
+      redo: () => {
+        const state = get();
+        const snapshot = state.redoStack[state.redoStack.length - 1];
+        if (!snapshot) {
+          return;
+        }
+
+        set({
+          ...applyBoardSnapshot(snapshot),
+          redoStack: state.redoStack.slice(0, -1),
+          undoStack: [...state.undoStack, snapshotBoard(state)],
+          currentStroke: null,
+          turnState: "idle"
+        });
+      }
     }),
     {
-      name: "draw-with-me-draft",
+      name: "draw-with-me-draft-v2",
       storage:
         typeof window === "undefined"
           ? undefined
           : createJSONStorage(() => window.localStorage),
       partialize: (state) => ({
-        elements: state.elements,
+        humanStrokes: state.humanStrokes,
+        drawingElements: state.drawingElements,
+        asciiBlocks: state.asciiBlocks,
         comments: state.comments,
         turnHistory: state.turnHistory,
+        turnCount: state.turnCount,
         paletteIndex: state.paletteIndex,
         strokeColor: state.strokeColor,
         aiTemperature: state.aiTemperature,
         aiMaxOutputTokens: state.aiMaxOutputTokens,
         backgroundMode: state.backgroundMode,
-        lastAiElementIndex: state.lastAiElementIndex
+        lastSyncedState: state.lastSyncedState
       })
     }
   )
 );
 
-export function selectPalette(paletteIndex: number): Palette {
-  return getPalette(paletteIndex);
+export function getCurrentSyncState() {
+  const state = useDrawStore.getState();
+  return {
+    humanStrokes: state.humanStrokes,
+    drawingElements: state.drawingElements,
+    asciiBlocks: state.asciiBlocks
+  };
+}
+
+export function getLastTurnArtifacts() {
+  const state = useDrawStore.getState();
+  const shapeSet = new Set(state.lastTurnElements);
+
+  return {
+    shapes: state.drawingElements.filter((element) => shapeSet.has(element.id)),
+    blocks: state.asciiBlocks.filter((block) => shapeSet.has(block.id))
+  };
+}
+
+export function buildAiTurnHistoryEntry(summary?: string | null) {
+  const { shapes, blocks } = getLastTurnArtifacts();
+  return createAiHistoryEntry({
+    description: summary ?? undefined,
+    shapes,
+    blocks,
+    commentSummary: summary ?? undefined
+  });
 }

@@ -25,8 +25,12 @@ const fallbackMessages = [
 type HeaderProps = {
   turnState: TurnState;
   clearCanvas: () => void;
-  thinkingMessages: string[];
+  thinkingText: string;
+  previewSaw: string;
+  previewDrawing: string;
   aiSummary: string | null;
+  aiSource?: "gemini" | "fallback-provider-error" | "fallback-parse-error" | null;
+  debugInfo?: { hasFocusImage: boolean; turnMode: "turn" | "comment" | null };
   setAiSummary: (value: string | null) => void;
   onToggleSettings?: () => void;
   settingsOpen?: boolean;
@@ -36,8 +40,12 @@ type HeaderProps = {
 export function Header({
   turnState,
   clearCanvas,
-  thinkingMessages,
+  thinkingText,
+  previewSaw,
+  previewDrawing,
   aiSummary,
+  aiSource,
+  debugInfo,
   setAiSummary,
   onToggleSettings,
   settingsOpen = false,
@@ -71,18 +79,21 @@ export function Header({
   }, [turnState]);
 
   const message = useMemo(() => {
-    if (turnState === "idle" || turnState === "humanDrawing") {
+    if (
+      turnState === "idle" ||
+      turnState === "humanDrawing" ||
+      turnState === "commenting"
+    ) {
       return aiSummary ?? "Ready when you are :)";
     }
 
-    return (
-      thinkingMessages[thinkingMessages.length - 1] ??
-      fallbackMessages[fallbackIndex]
-    );
-  }, [aiSummary, fallbackIndex, thinkingMessages, turnState]);
+    return thinkingText || previewDrawing || previewSaw || fallbackMessages[fallbackIndex];
+  }, [aiSummary, fallbackIndex, previewDrawing, previewSaw, thinkingText, turnState]);
 
   const isLoading =
-    turnState === "awaitingModel" || turnState === "modelStreaming";
+    turnState === "awaitingModel" ||
+    turnState === "modelStreaming" ||
+    turnState === "modelAnimating";
 
   useEffect(() => {
     setIsMessageExpanded(false);
@@ -180,6 +191,20 @@ export function Header({
                 </motion.span>
               </AnimatePresence>
             </div>
+            {aiSource ? (
+              <span className="draw-app-header__source-tag">
+                {aiSource === "gemini"
+                  ? "gemini"
+                  : aiSource === "fallback-parse-error"
+                    ? "fallback: parse"
+                    : "fallback: provider"}
+              </span>
+            ) : null}
+            {debugInfo ? (
+              <span className="draw-app-header__source-tag draw-app-header__source-tag--muted">
+                {debugInfo.turnMode ?? "-"} · {debugInfo.hasFocusImage ? "focus" : "no-focus"}
+              </span>
+            ) : null}
           </div>
         </div>
 

@@ -6,7 +6,7 @@ import { GEMINI_GRADIENT_STOPS } from "@/lib/gemini-gradient";
 type PenCursorIconProps = {
   className?: string;
   style?: CSSProperties;
-  variant?: "solid" | "gemini";
+  variant?: "solid" | "ai";
 };
 
 export function PenCursorIcon({
@@ -26,7 +26,7 @@ export function PenCursorIcon({
       style={style}
       aria-hidden="true"
     >
-      {variant === "gemini" ? (
+      {variant === "ai" ? (
         <defs>
           <linearGradient
             id={gradientId}
@@ -48,9 +48,9 @@ export function PenCursorIcon({
       ) : null}
       <path
         d={pathData}
-        fill={variant === "gemini" ? `url(#${gradientId})` : "currentColor"}
+        fill={variant === "ai" ? `url(#${gradientId})` : "currentColor"}
       />
-      {variant === "gemini" ? (
+      {variant === "ai" ? (
         <path
           d={pathData}
           fill="none"

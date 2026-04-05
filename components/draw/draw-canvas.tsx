@@ -4,6 +4,7 @@ import {
   forwardRef,
   useCallback,
   useEffect,
+  useId,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -12,22 +13,32 @@ import {
   type TouchEvent as ReactTouchEvent,
   type WheelEvent as ReactWheelEvent
 } from "react";
+import { type AnimatedVisual } from "@/lib/draw/animation";
 import {
-  type CommentPin,
-  type DrawingElement,
+  type AiCursorPresence,
+  type CommentThread,
   type HumanStroke,
+  type PersistedAsciiBlock,
+  type PersistedShapeElement,
   type Point,
+  type SpeechDraft,
   type ToolMode
 } from "@/lib/draw-types";
 import {
   clamp,
-  getDrawingBounds,
-  elementsToSvg,
-  renderDrawing,
-  type Viewport,
-  worldToScreen
-} from "@/lib/draw-utils";
+  getActiveRegionBounds,
+  getBoardBounds,
+  humanStrokeToPathData,
+  screenToWorld,
+  serializeBoardSvg,
+  worldToScreen,
+  type Viewport
+} from "@/lib/draw/rendering";
+import { shapeToPathData } from "@/lib/draw/shapes";
+import { PAPER_COLOR } from "@/lib/draw/shared";
+import { rasterizeSvgMarkup } from "@/lib/draw/rasterize";
 import { PenCursorIcon } from "@/components/draw/pen-cursor-icon";
+import { TextCursorIcon } from "@/components/draw/text-cursor-icon";
 
 export type DrawCanvasHandle = {
   captureSnapshot: (options?: {
@@ -35,7 +46,14 @@ export type DrawCanvasHandle = {
     maxHeight?: number;
     mimeType?: string;
     quality?: number;
-  }) => string;
+  }) => Promise<string>;
+  captureFocusSnapshot: (options?: {
+    maxWidth?: number;
+    maxHeight?: number;
+    mimeType?: string;
+    quality?: number;
+    padding?: number;
+  }) => Promise<string>;
   exportSvg: () => string;
   getCanvasMetrics: () => {
     width: number;
@@ -51,10 +69,12 @@ const SNAPSHOT_PADDING = 140;
 const INITIAL_VIEW_PADDING = 180;
 
 type DrawCanvasProps = {
-  elements: DrawingElement[];
+  humanStrokes: HumanStroke[];
   currentStroke: HumanStroke | null;
-  ephemeralElement: DrawingElement | null;
-  comments: CommentPin[];
+  drawingElements: PersistedShapeElement[];
+  asciiBlocks: PersistedAsciiBlock[];
+  activeAnimation: AnimatedVisual | null;
+  comments: CommentThread[];
   activeCommentId: string | null;
   commentComposer:
     | {
@@ -63,11 +83,12 @@ type DrawCanvasProps = {
         text: string;
       }
     | null;
+  speechDraft: SpeechDraft | null;
+  aiCursor: AiCursorPresence;
   tool: ToolMode;
   strokeColor: string;
   backgroundMode: "dots" | "grid";
   loading: boolean;
-  narration: string;
   onStartStroke: (point: Point) => void;
   onMoveStroke: (point: Point) => void;
   onEndStroke: () => void;
@@ -97,20 +118,196 @@ type GestureState =
     }
   | null;
 
+function HumanStrokeSvg({
+  stroke,
+  preview
+}: {
+  stroke: HumanStroke;
+  preview?: boolean;
+}) {
+  const path = humanStrokeToPathData(stroke);
+  const isErase = stroke.tool === "erase";
+
+  return (
+    <path
+      d={path}
+      fill="none"
+      stroke={isErase ? "rgba(246, 183, 160, 0.9)" : stroke.color}
+      strokeWidth={stroke.size}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      opacity={preview ? 0.9 : 1}
+      vectorEffect="non-scaling-stroke"
+    />
+  );
+}
+
+function ShapeElementSvg({
+  element,
+  progress = 1
+}: {
+  element: PersistedShapeElement;
+  progress?: number;
+}) {
+  const shape = element.shape;
+  const stroke = "stroke" in shape ? shape.stroke ?? "#262523" : "#262523";
+  const strokeWidth = "strokeWidth" in shape ? shape.strokeWidth ?? 3 : 3;
+  const opacity = "opacity" in shape ? shape.opacity ?? 1 : 1;
+
+  if (shape.kind === "erase") {
+    return (
+      <path
+        d={shapeToPathData(shape)}
+        fill="none"
+        stroke="rgba(246, 183, 160, 0.86)"
+        strokeWidth={shape.strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity={0.92}
+        vectorEffect="non-scaling-stroke"
+        pathLength={1}
+        strokeDasharray={1}
+        strokeDashoffset={1 - progress}
+      />
+    );
+  }
+
+  const fill = "fill" in shape ? shape.fill ?? "transparent" : "transparent";
+  const path = shapeToPathData(shape);
+  const fillOpacity =
+    fill === "transparent" ? 0 : Math.max(0, Math.min(1, (progress - 0.72) / 0.28)) * opacity;
+
+  return (
+    <path
+      d={path}
+      fill={fill}
+      fillOpacity={fillOpacity}
+      stroke={stroke}
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      opacity={opacity}
+      vectorEffect="non-scaling-stroke"
+      pathLength={1}
+      strokeDasharray={1}
+      strokeDashoffset={1 - progress}
+    />
+  );
+}
+
+function AsciiBlockSvg({
+  block,
+  visibleText
+}: {
+  block: PersistedAsciiBlock;
+  visibleText?: string;
+}) {
+  const text = visibleText ?? block.text;
+  const lines = text.split("\n");
+
+  return (
+    <text
+      x={block.x}
+      y={block.y}
+      fill={block.color}
+      fontSize={block.fontSize}
+      fontFamily='Caveat, "Courier New", monospace'
+      dominantBaseline="hanging"
+    >
+      {lines.map((line, index) => (
+        <tspan key={`${block.id}-${index}`} x={block.x} dy={index === 0 ? 0 : block.fontSize * 1.02}>
+          {line}
+        </tspan>
+      ))}
+    </text>
+  );
+}
+
+function EraserMask({
+  id,
+  bounds,
+  humanStrokes,
+  drawingElements
+}: {
+  id: string;
+  bounds: {
+    minX: number;
+    minY: number;
+    width: number;
+    height: number;
+  };
+  humanStrokes: HumanStroke[];
+  drawingElements: PersistedShapeElement[];
+}) {
+  const padding = 2048;
+  const x = bounds.minX - padding;
+  const y = bounds.minY - padding;
+  const width = bounds.width + padding * 2;
+  const height = bounds.height + padding * 2;
+
+  return (
+    <mask
+      id={id}
+      maskUnits="userSpaceOnUse"
+      maskContentUnits="userSpaceOnUse"
+      x={x}
+      y={y}
+      width={width}
+      height={height}
+    >
+      <rect x={x} y={y} width={width} height={height} fill="white" />
+      {humanStrokes
+        .filter((stroke) => stroke.tool === "erase")
+        .map((stroke) => (
+          <path
+            key={stroke.id}
+            d={humanStrokeToPathData(stroke)}
+            fill="none"
+            stroke="black"
+            strokeWidth={stroke.size}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+      {drawingElements
+        .filter((element) => element.shape.kind === "erase")
+        .map((element) => {
+          const shape = element.shape;
+          return (
+            <path
+              key={element.id}
+              d={shapeToPathData(shape)}
+              fill="none"
+              stroke="black"
+              strokeWidth={shape.strokeWidth}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+            />
+          );
+        })}
+    </mask>
+  );
+}
+
 export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
   function DrawCanvas(
     {
-      elements,
+      humanStrokes,
       currentStroke,
-      ephemeralElement,
+      drawingElements,
+      asciiBlocks,
+      activeAnimation,
       comments,
       activeCommentId,
       commentComposer,
+      speechDraft,
+      aiCursor,
       tool,
       strokeColor,
       backgroundMode,
       loading,
-      narration,
       onStartStroke,
       onMoveStroke,
       onEndStroke,
@@ -125,26 +322,26 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
     ref
   ) {
     const containerRef = useRef<HTMLDivElement | null>(null);
-    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const maskId = useId();
     const [containerSize, setContainerSize] = useState({ width: 1200, height: 760 });
     const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, scale: 1 });
     const [gesture, setGesture] = useState<GestureState>(null);
     const [cursorPoint, setCursorPoint] = useState<Point | null>(null);
-    const touchStateRef = useRef<Map<number, Point>>(new Map());
-    const animationFrameRef = useRef<number | null>(null);
     const hasInitializedViewportRef = useRef(false);
 
     const sceneBounds = useMemo(
       () =>
-        getDrawingBounds(
-          elements,
+        getBoardBounds({
+          humanStrokes,
+          drawingElements,
+          asciiBlocks,
           comments,
           currentStroke,
-          INITIAL_VIEW_PADDING,
-          DEFAULT_SNAPSHOT_WIDTH,
-          DEFAULT_SNAPSHOT_HEIGHT
-        ),
-      [comments, currentStroke, elements]
+          padding: INITIAL_VIEW_PADDING,
+          minWidth: DEFAULT_SNAPSHOT_WIDTH,
+          minHeight: DEFAULT_SNAPSHOT_HEIGHT
+        }),
+      [asciiBlocks, comments, currentStroke, drawingElements, humanStrokes]
     );
 
     const totalScale = viewport.scale;
@@ -159,7 +356,7 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
           Math.max(1, containerSize.width - 72) / Math.max(1, sceneBounds.width),
           Math.max(1, containerSize.height - 140) / Math.max(1, sceneBounds.height)
         ),
-        0.3,
+        0.24,
         1
       );
 
@@ -182,42 +379,22 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
           return null;
         }
 
-        return {
-          x: (clientX - rect.left - viewport.x) / totalScale,
-          y: (clientY - rect.top - viewport.y) / totalScale
-        };
+        return screenToWorld(
+          {
+            x: clientX,
+            y: clientY
+          },
+          rect,
+          viewport
+        );
       },
-      [totalScale, viewport.x, viewport.y]
-    );
-
-    const convertWorldToClient = useCallback(
-      (point: Point) =>
-        worldToScreen(point, viewport),
       [viewport]
     );
 
-    const aiCursorPoint = useMemo(() => {
-      if (!ephemeralElement || ephemeralElement.kind === "humanStroke") {
-        return null;
-      }
-
-      if (ephemeralElement.kind === "aiStroke") {
-        const tip = ephemeralElement.points[ephemeralElement.points.length - 1];
-        return tip ? convertWorldToClient(tip) : null;
-      }
-
-      if (ephemeralElement.kind === "shape") {
-        return convertWorldToClient({
-          x: ephemeralElement.x,
-          y: ephemeralElement.y
-        });
-      }
-
-      return convertWorldToClient({
-        x: ephemeralElement.x,
-        y: ephemeralElement.y
-      });
-    }, [convertWorldToClient, ephemeralElement]);
+    const convertWorldToClient = useCallback(
+      (point: Point) => worldToScreen(point, viewport),
+      [viewport]
+    );
 
     useEffect(() => {
       const observer = new ResizeObserver((entries) => {
@@ -225,6 +402,7 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
         if (!entry) {
           return;
         }
+
         setContainerSize({
           width: entry.contentRect.width,
           height: entry.contentRect.height
@@ -238,82 +416,40 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
       return () => observer.disconnect();
     }, []);
 
-    useEffect(() => {
-      const canvas = canvasRef.current;
-      if (!canvas) {
-        return;
-      }
-
-      const ratio = window.devicePixelRatio || 1;
-      canvas.width = Math.max(1, Math.floor(containerSize.width * ratio));
-      canvas.height = Math.max(1, Math.floor(containerSize.height * ratio));
-      canvas.style.width = `${containerSize.width}px`;
-      canvas.style.height = `${containerSize.height}px`;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        return;
-      }
-
-      const drawFrame = (time: number) => {
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.setTransform(
-          ratio * totalScale,
-          0,
-          0,
-          ratio * totalScale,
-          ratio * viewport.x,
-          ratio * viewport.y
-        );
-        renderDrawing(
-          ctx,
-          containerSize.width,
-          containerSize.height,
-          ephemeralElement ? [...elements, ephemeralElement] : elements,
-          currentStroke,
-          { motionTimeMs: time }
-        );
-        animationFrameRef.current = window.requestAnimationFrame(drawFrame);
-      };
-
-      animationFrameRef.current = window.requestAnimationFrame(drawFrame);
-
-      return () => {
-        if (animationFrameRef.current) {
-          window.cancelAnimationFrame(animationFrameRef.current);
-          animationFrameRef.current = null;
-        }
-      };
-    }, [
-      containerSize.height,
-      containerSize.width,
-      currentStroke,
-      elements,
-      ephemeralElement,
-      totalScale,
-      viewport.x,
-      viewport.y,
-      containerSize.height,
-      containerSize.width
-    ]);
-
     const snapshotBounds = useMemo(
       () =>
-        getDrawingBounds(
-          elements,
+        getBoardBounds({
+          humanStrokes,
+          drawingElements,
+          asciiBlocks,
           comments,
           currentStroke,
-          SNAPSHOT_PADDING,
-          DEFAULT_SNAPSHOT_WIDTH,
-          DEFAULT_SNAPSHOT_HEIGHT
-        ),
-      [comments, currentStroke, elements]
+          padding: SNAPSHOT_PADDING,
+          minWidth: DEFAULT_SNAPSHOT_WIDTH,
+          minHeight: DEFAULT_SNAPSHOT_HEIGHT
+        }),
+      [asciiBlocks, comments, currentStroke, drawingElements, humanStrokes]
+    );
+
+    const focusBounds = useMemo(
+      () =>
+        getActiveRegionBounds({
+          syncState: {
+            humanStrokes,
+            drawingElements,
+            asciiBlocks
+          },
+          targetComment: comments.find((comment) => comment.id === activeCommentId) ?? null,
+          fallbackBounds: snapshotBounds,
+          padding: 140
+        }),
+      [activeCommentId, asciiBlocks, comments, drawingElements, humanStrokes, snapshotBounds]
     );
 
     useImperativeHandle(
       ref,
       () => ({
-        captureSnapshot: (options) => {
+        captureSnapshot: async (options) => {
           const maxWidth = options?.maxWidth ?? 640;
           const maxHeight = options?.maxHeight ?? 400;
           const scale = Math.min(
@@ -321,57 +457,73 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
             maxWidth / snapshotBounds.width,
             maxHeight / snapshotBounds.height
           );
-          const exportCanvas = document.createElement("canvas");
-          exportCanvas.width = Math.max(1, Math.round(snapshotBounds.width * scale));
-          exportCanvas.height = Math.max(1, Math.round(snapshotBounds.height * scale));
-          const ctx = exportCanvas.getContext("2d");
-          if (!ctx) {
-            return "";
-          }
-          ctx.scale(scale, scale);
-          ctx.fillStyle = "#faf9f7";
-          ctx.fillRect(0, 0, snapshotBounds.width, snapshotBounds.height);
-          ctx.translate(-snapshotBounds.minX, -snapshotBounds.minY);
-          renderDrawing(ctx, snapshotBounds.width, snapshotBounds.height, elements);
-          return exportCanvas.toDataURL(
-            options?.mimeType ?? "image/jpeg",
-            options?.quality ?? 0.72
-          );
-        },
-        exportSvg: () => {
-          const translatedElements = elements.map((element) => {
-            switch (element.kind) {
-              case "humanStroke":
-              case "aiStroke":
-                return {
-                  ...element,
-                  points: element.points.map((point) => ({
-                    ...point,
-                    x: point.x - snapshotBounds.minX,
-                    y: point.y - snapshotBounds.minY
-                  }))
-                };
-              case "shape":
-                return {
-                  ...element,
-                  x: element.x - snapshotBounds.minX,
-                  y: element.y - snapshotBounds.minY
-                };
-              case "asciiBlock":
-                return {
-                  ...element,
-                  x: element.x - snapshotBounds.minX,
-                  y: element.y - snapshotBounds.minY
-                };
-            }
+          const width = Math.max(1, Math.round(snapshotBounds.width * scale));
+          const height = Math.max(1, Math.round(snapshotBounds.height * scale));
+          const markup = serializeBoardSvg({
+            width: snapshotBounds.width,
+            height: snapshotBounds.height,
+            translateX: -snapshotBounds.minX,
+            translateY: -snapshotBounds.minY,
+            humanStrokes,
+            drawingElements,
+            asciiBlocks
           });
 
-          return elementsToSvg(
-            translatedElements,
-            snapshotBounds.width,
-            snapshotBounds.height
-          );
+          return rasterizeSvgMarkup({
+            markup,
+            width,
+            height,
+            mimeType: options?.mimeType,
+            quality: options?.quality
+          });
         },
+        captureFocusSnapshot: async (options) => {
+          const maxWidth = options?.maxWidth ?? 1024;
+          const maxHeight = options?.maxHeight ?? 1024;
+          const padding = options?.padding ?? 80;
+          const paddedBounds = {
+            minX: focusBounds.minX - padding,
+            minY: focusBounds.minY - padding,
+            maxX: focusBounds.maxX + padding,
+            maxY: focusBounds.maxY + padding,
+            width: focusBounds.width + padding * 2,
+            height: focusBounds.height + padding * 2
+          };
+          const scale = Math.min(
+            1,
+            maxWidth / paddedBounds.width,
+            maxHeight / paddedBounds.height
+          );
+          const width = Math.max(1, Math.round(paddedBounds.width * scale));
+          const height = Math.max(1, Math.round(paddedBounds.height * scale));
+          const markup = serializeBoardSvg({
+            width: paddedBounds.width,
+            height: paddedBounds.height,
+            translateX: -paddedBounds.minX,
+            translateY: -paddedBounds.minY,
+            humanStrokes,
+            drawingElements,
+            asciiBlocks
+          });
+
+          return rasterizeSvgMarkup({
+            markup,
+            width,
+            height,
+            mimeType: options?.mimeType,
+            quality: options?.quality
+          });
+        },
+        exportSvg: () =>
+          serializeBoardSvg({
+            width: snapshotBounds.width,
+            height: snapshotBounds.height,
+            translateX: -snapshotBounds.minX,
+            translateY: -snapshotBounds.minY,
+            humanStrokes,
+            drawingElements,
+            asciiBlocks
+          }),
         getCanvasMetrics: () => ({
           width: Math.round(snapshotBounds.width),
           height: Math.round(snapshotBounds.height),
@@ -379,7 +531,7 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
           originY: snapshotBounds.minY
         })
       }),
-      [comments, currentStroke, elements, snapshotBounds]
+      [activeCommentId, asciiBlocks, comments, drawingElements, focusBounds, humanStrokes, snapshotBounds]
     );
 
     const startPan = useCallback(
@@ -505,12 +657,6 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
     const handleTouchStart = useCallback(
       (event: ReactTouchEvent<HTMLDivElement>) => {
         const touches = Array.from(event.touches);
-        touches.forEach((touch) => {
-          touchStateRef.current.set(touch.identifier, {
-            x: touch.clientX,
-            y: touch.clientY
-          });
-        });
 
         if (touches.length === 2) {
           const [a, b] = touches;
@@ -571,10 +717,8 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
           const scaleRatio = nextDistance / gesture.startDistance;
           setViewport({
             scale: clamp(gesture.startViewport.scale * scaleRatio, 0.24, 3.2),
-            x:
-              gesture.startViewport.x + (center.x - gesture.startCenter.x),
-            y:
-              gesture.startViewport.y + (center.y - gesture.startCenter.y)
+            x: gesture.startViewport.x + (center.x - gesture.startCenter.x),
+            y: gesture.startViewport.y + (center.y - gesture.startCenter.y)
           });
           return;
         }
@@ -589,20 +733,31 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
       [convertClientToWorld, gesture, onMoveStroke]
     );
 
-    const handleTouchEnd = useCallback(
-      (event: ReactTouchEvent<HTMLDivElement>) => {
-        if (gesture?.type === "draw") {
-          onEndStroke();
-        }
-        setGesture(null);
-      },
-      [gesture?.type, onEndStroke]
-    );
+    const handleTouchEnd = useCallback(() => {
+      if (gesture?.type === "draw") {
+        onEndStroke();
+      }
+      setGesture(null);
+    }, [gesture?.type, onEndStroke]);
 
     const activeComment = useMemo(
       () => comments.find((comment) => comment.id === activeCommentId) ?? null,
       [activeCommentId, comments]
     );
+
+    const aiCursorPoint = aiCursor.visible
+      ? convertWorldToClient({
+          x: aiCursor.x,
+          y: aiCursor.y
+        })
+      : null;
+
+    const speechPoint = speechDraft
+      ? convertWorldToClient({
+          x: speechDraft.x ?? aiCursor.x,
+          y: speechDraft.y ?? aiCursor.y
+        })
+      : null;
 
     return (
       <div
@@ -629,7 +784,60 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
                 : `${26 * totalScale}px ${26 * totalScale}px`
           }}
         />
-        <canvas ref={canvasRef} className="draw-canvas" />
+
+        <svg
+          className="draw-canvas"
+          width={containerSize.width}
+          height={containerSize.height}
+          viewBox={`0 0 ${containerSize.width} ${containerSize.height}`}
+        >
+          <defs>
+            <EraserMask
+              id={maskId}
+              bounds={sceneBounds}
+              humanStrokes={humanStrokes}
+              drawingElements={drawingElements}
+            />
+          </defs>
+
+          <g transform={`translate(${viewport.x} ${viewport.y}) scale(${totalScale})`}>
+            <g mask={`url(#${maskId})`}>
+              {asciiBlocks.map((block) => (
+                <AsciiBlockSvg key={block.id} block={block} />
+              ))}
+              {humanStrokes
+                .filter((stroke) => stroke.tool !== "erase")
+                .map((stroke) => (
+                  <HumanStrokeSvg key={stroke.id} stroke={stroke} />
+                ))}
+              {drawingElements
+                .filter((element) => element.shape.kind !== "erase")
+                .map((element) => (
+                  <ShapeElementSvg key={element.id} element={element} />
+                ))}
+            </g>
+
+            {drawingElements
+              .filter((element) => element.shape.kind === "erase")
+              .map((element) => (
+                <ShapeElementSvg key={element.id} element={element} />
+              ))}
+
+            {activeAnimation?.type === "shape" ? (
+              <ShapeElementSvg
+                element={activeAnimation.element}
+                progress={activeAnimation.progress}
+              />
+            ) : null}
+            {activeAnimation?.type === "block" ? (
+              <AsciiBlockSvg
+                block={activeAnimation.block}
+                visibleText={activeAnimation.visibleText}
+              />
+            ) : null}
+            {currentStroke ? <HumanStrokeSvg stroke={currentStroke} preview /> : null}
+          </g>
+        </svg>
 
         <div
           className="draw-overlay-layer"
@@ -705,30 +913,50 @@ export const DrawCanvas = forwardRef<DrawCanvasHandle, DrawCanvasProps>(
                 disabled={loading}
                 onClick={() => onAskAiAboutComment(activeComment.id)}
               >
-                {loading ? "Thinking..." : "Ask AI to respond"}
+                {loading ? "Working..." : "Reply or draw here"}
               </button>
             </div>
           ) : null}
         </div>
 
+        {speechDraft && speechPoint ? (
+          <div
+            className="draw-ai-speech"
+            style={{
+              left: speechPoint.x,
+              top: speechPoint.y
+            }}
+          >
+            <span>{speechDraft.text}</span>
+          </div>
+        ) : null}
+
         {aiCursorPoint ? (
           <div
-            className="draw-pen-cursor"
+            className={`draw-pen-cursor draw-pen-cursor--${aiCursor.phase}`}
             style={{ left: aiCursorPoint.x, top: aiCursorPoint.y }}
           >
-            <PenCursorIcon variant="gemini" className="draw-pen-cursor__icon" />
+            <PenCursorIcon variant="ai" className="draw-pen-cursor__icon" />
           </div>
         ) : null}
 
-        {!aiCursorPoint && cursorPoint && tool === "draw" ? (
+        {tool === "draw" && cursorPoint ? (
           <div
-            className="draw-pen-cursor"
-            style={{ left: cursorPoint.x, top: cursorPoint.y }}
+            className="draw-local-cursor"
+            style={{ left: cursorPoint.x, top: cursorPoint.y, color: strokeColor }}
           >
-            <PenCursorIcon style={{ color: strokeColor }} className="draw-pen-cursor__icon" />
+            <PenCursorIcon variant="solid" className="draw-pen-cursor__icon" />
           </div>
         ) : null}
 
+        {tool === "ascii" && cursorPoint ? (
+          <div
+            className="draw-local-cursor draw-local-cursor--text"
+            style={{ left: cursorPoint.x, top: cursorPoint.y, color: strokeColor }}
+          >
+            <TextCursorIcon className="draw-text-cursor__icon" />
+          </div>
+        ) : null}
       </div>
     );
   }

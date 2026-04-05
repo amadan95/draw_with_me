@@ -6,107 +6,34 @@ import { AuthControls } from "@/components/draw/auth-controls";
 import { DrawCanvas, type DrawCanvasHandle } from "@/components/draw/draw-canvas";
 import { Header } from "@/components/draw/header";
 import { TwinkleClusterIcon } from "@/components/draw/twinkle-cluster-icon";
-import { useDrawStore } from "@/lib/draw-store";
 import {
-  type DrawStreamEvent,
-  type DrawingElement,
+  animateBlockReveal,
+  animateCursorGlide,
+  animateCursorTrace,
+  getCursorHoverPoint,
+  getCursorStartPoint,
+  sleep,
+  type AnimatedVisual
+} from "@/lib/draw/animation";
+import { computeDrawingDiff, diffHasChanges } from "@/lib/draw/diff";
+import { parseNdjsonStream, translateStreamEvent } from "@/lib/draw/parsing";
+import { buildAiTurnHistoryEntry, getCurrentSyncState, useDrawStore } from "@/lib/draw-store";
+import {
+  type PersistedShapeElement,
   type Point,
-  createId,
-  getPalette,
+  type DrawStreamEvent,
+  getPalette
 } from "@/lib/draw-types";
-import {
-  getCanvasHumanContext,
-  getRecentAiContext,
-  parseNdjsonStream,
-  translateAiContext,
-  translateComments,
-  translateHumanContext
-} from "@/lib/draw-utils";
 
 const hasClerk = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 const strokeSteps = [3, 6, 12] as const;
-
-function getStrokeMeasurements(points: Point[]) {
-  const cumulativeDistances = [0];
-  let totalLength = 0;
-
-  for (let index = 1; index < points.length; index += 1) {
-    const previous = points[index - 1];
-    const current = points[index];
-    totalLength += Math.hypot(current.x - previous.x, current.y - previous.y);
-    cumulativeDistances.push(totalLength);
-  }
-
-  return {
-    cumulativeDistances,
-    totalLength
-  };
-}
-
-function interpolatePoint(start: Point, end: Point, t: number): Point {
-  return {
-    x: start.x + (end.x - start.x) * t,
-    y: start.y + (end.y - start.y) * t
-  };
-}
-
-function getSegmentAngle(start: Point, end: Point) {
-  return Math.atan2(end.y - start.y, end.x - start.x) * (180 / Math.PI);
-}
-
-function sampleStrokeAtDistance(
-  points: Point[],
-  cumulativeDistances: number[],
-  travelDistance: number
-) {
-  if (points.length < 2) {
-    return {
-      partialPoints: points,
-      angle: -10
-    };
-  }
-
-  const totalLength = cumulativeDistances[cumulativeDistances.length - 1] ?? 0;
-  const clampedDistance = Math.max(0, Math.min(totalLength, travelDistance));
-  const partialPoints: Point[] = [points[0]];
-
-  for (let index = 1; index < points.length; index += 1) {
-    const previous = points[index - 1];
-    const current = points[index];
-    const segmentStart = cumulativeDistances[index - 1] ?? 0;
-    const segmentEnd = cumulativeDistances[index] ?? segmentStart;
-
-    if (clampedDistance >= segmentEnd) {
-      partialPoints.push(current);
-      continue;
-    }
-
-    const segmentLength = segmentEnd - segmentStart;
-    const segmentProgress =
-      segmentLength <= 0 ? 1 : (clampedDistance - segmentStart) / segmentLength;
-    partialPoints.push(interpolatePoint(previous, current, segmentProgress));
-
-    return {
-      partialPoints,
-      angle: getSegmentAngle(previous, current)
-    };
-  }
-
-  return {
-    partialPoints: points,
-    angle: getSegmentAngle(points[points.length - 2], points[points.length - 1])
-  };
-}
-
-function easeInOutSine(progress: number) {
-  return -(Math.cos(Math.PI * progress) - 1) * 0.5;
-}
 
 export function DrawApp() {
   const canvasRef = useRef<DrawCanvasHandle | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const animationChainRef = useRef<Promise<void>>(Promise.resolve());
-  const [ephemeralElement, setEphemeralElement] = useState<DrawingElement | null>(null);
+  const aiCursorRef = useRef<Point>({ x: 120, y: 120 });
+  const [activeAnimation, setActiveAnimation] = useState<AnimatedVisual | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [usageBanner, setUsageBanner] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -114,9 +41,13 @@ export function DrawApp() {
   const isSignedIn = auth?.isSignedIn ?? false;
 
   const {
-    elements,
+    humanStrokes,
+    currentStroke,
+    drawingElements,
+    asciiBlocks,
     comments,
     turnHistory,
+    turnCount,
     tool,
     strokeSize,
     paletteIndex,
@@ -124,14 +55,20 @@ export function DrawApp() {
     aiTemperature,
     aiMaxOutputTokens,
     backgroundMode,
-    currentStroke,
     turnState,
-    thinkingMessages,
+    thinkingText,
     narration,
+    previewSaw,
+    previewDrawing,
     aiSummary,
     activeCommentId,
     commentComposer,
-    usage,
+    sessionUsage,
+    aiCursor,
+    speechDraft,
+    lastSyncedState,
+    aiSource,
+    debugInfo,
     setTool,
     setStrokeSize,
     setPaletteIndex,
@@ -139,13 +76,21 @@ export function DrawApp() {
     setAiTemperature,
     setAiMaxOutputTokens,
     cyclePalette,
-    setTurnState,
     setThinkingText,
-    clearThinkingMessages,
     setNarration,
+    setPreviewSaw,
+    setPreviewDrawing,
     setAiSummary,
     setActiveCommentId,
-    setUsage,
+    setSessionUsage,
+    setInteractionStyle,
+    setAiCursor,
+    clearAiCursor,
+    setSpeechDraft,
+    appendSpeechDraft,
+    clearSpeechDraft,
+    setAiSource,
+    setDebugInfo,
     beginStroke,
     appendStrokePoint,
     commitStroke,
@@ -156,9 +101,16 @@ export function DrawApp() {
     closeCommentComposer,
     submitCommentComposer,
     appendCommentReply,
-    addAiElement,
+    dismissCommentThread,
+    beginModelRequest,
+    beginModelStreaming,
+    beginModelAnimating,
+    completeModelTurn,
+    failTurn,
     addHistoryEntry,
-    checkpointAiState,
+    commitAiShape,
+    commitAiBlock,
+    markSyncedState,
     clearBoard
   } = useDrawStore();
 
@@ -168,135 +120,80 @@ export function DrawApp() {
     turnState === "modelStreaming" ||
     turnState === "modelAnimating";
 
-  const translateSnapshotEvent = (
-    event: DrawStreamEvent,
-    originX: number,
-    originY: number
-  ): DrawStreamEvent => {
-    switch (event.type) {
-      case "stroke":
-        return {
-          ...event,
-          stroke: {
-            ...event.stroke,
-            points: event.stroke.points.map((point) => ({
-              ...point,
-              x: point.x + originX,
-              y: point.y + originY
-            }))
-          }
-        };
-      case "shape":
-        return {
-          ...event,
-          shape: {
-            ...event.shape,
-            x: event.shape.x + originX,
-            y: event.shape.y + originY
-          }
-        };
-      case "ascii_block":
-        return {
-          ...event,
-          block: {
-            ...event.block,
-            x: event.block.x + originX,
-            y: event.block.y + originY
-          }
-        };
-      default:
-        return event;
-    }
+  const syncState = useMemo(
+    () => ({
+      humanStrokes,
+      drawingElements,
+      asciiBlocks
+    }),
+    [asciiBlocks, drawingElements, humanStrokes]
+  );
+
+  const updateAiCursor = (point: Point, phase: typeof aiCursor.phase, color?: string) => {
+    aiCursorRef.current = point;
+    setAiCursor({
+      visible: true,
+      phase,
+      x: point.x,
+      y: point.y,
+      color
+    });
+  };
+
+  const animateShapeEvent = async (element: PersistedShapeElement) => {
+    const color =
+      "stroke" in element.shape
+        ? element.shape.stroke ?? palette[0]
+        : palette[0];
+
+    beginModelAnimating();
+    const startPoint = getCursorStartPoint(element);
+    await animateCursorGlide({
+      from: aiCursorRef.current,
+      to: startPoint,
+      onUpdate: (update) => updateAiCursor(update.point, update.phase, color)
+    });
+    await animateCursorTrace({
+      element,
+      onFrame: (visual, update) => {
+        setActiveAnimation(visual);
+        updateAiCursor(update.point, update.phase, color);
+      }
+    });
+    setActiveAnimation(null);
+    commitAiShape(element);
+    updateAiCursor(getCursorHoverPoint(element), "settling", color);
+    await sleep(80);
+  };
+
+  const animateBlockEvent = async (block: typeof asciiBlocks[number]) => {
+    beginModelAnimating();
+    await animateCursorGlide({
+      from: aiCursorRef.current,
+      to: { x: block.x, y: block.y },
+      onUpdate: (update) => updateAiCursor(update.point, update.phase, block.color)
+    });
+    await animateBlockReveal({
+      block,
+      onFrame: (visual, update) => {
+        setActiveAnimation(visual);
+        updateAiCursor(update.point, update.phase, block.color);
+      }
+    });
+    setActiveAnimation(null);
+    commitAiBlock(block);
+    updateAiCursor({ x: block.x, y: block.y }, "settling", block.color);
+    await sleep(66);
   };
 
   const queueAnimation = (event: DrawStreamEvent) => {
     animationChainRef.current = animationChainRef.current.then(async () => {
-      setTurnState("modelAnimating");
-
       switch (event.type) {
-        case "stroke": {
-          const fullStroke = event.stroke;
-          const strokeSpeed = Math.min(
-            1.25,
-            Math.max(0.2, fullStroke.timing?.speed ?? 0.65)
-          );
-          const { cumulativeDistances, totalLength } = getStrokeMeasurements(fullStroke.points);
-          const pixelsPerSecond = 95 + strokeSpeed * 110;
-          const minimumDuration = totalLength < 56 ? 420 : 620;
-          const totalDuration = Math.max(
-            minimumDuration,
-            Math.min(4200, Math.round((totalLength / pixelsPerSecond) * 1000))
-          );
-
-          await new Promise<void>((resolve) => {
-            const startTime = performance.now();
-
-            const animateStroke = (now: number) => {
-              const rawProgress = Math.min(1, (now - startTime) / totalDuration);
-              const easedProgress = easeInOutSine(rawProgress);
-              const { partialPoints } = sampleStrokeAtDistance(
-                fullStroke.points,
-                cumulativeDistances,
-                totalLength * easedProgress
-              );
-
-              setEphemeralElement({
-                ...fullStroke,
-                points: partialPoints
-              });
-
-              if (rawProgress < 1) {
-                window.requestAnimationFrame(animateStroke);
-                return;
-              }
-
-              resolve();
-            };
-
-            window.requestAnimationFrame(animateStroke);
-          });
-
-          setEphemeralElement(fullStroke);
-          await new Promise((resolve) => setTimeout(resolve, 42));
-          setEphemeralElement(null);
-          addAiElement(fullStroke);
-          if (fullStroke.timing?.pauseAfterMs) {
-            await new Promise((resolve) =>
-              setTimeout(resolve, fullStroke.timing?.pauseAfterMs)
-            );
-          }
-          break;
-        }
         case "shape":
-          setEphemeralElement({
-            ...event.shape,
-            width: event.shape.width * 0.35,
-            height: event.shape.height * 0.35
-          });
-          await new Promise((resolve) => setTimeout(resolve, 80));
-          setEphemeralElement(null);
-          addAiElement(event.shape);
+          await animateShapeEvent(event.shape);
           break;
-        case "ascii_block": {
-          const lines = event.block.text.split("\n");
-          let currentText = "";
-          for (const line of lines) {
-            currentText += `${currentText ? "\n" : ""}${line}`;
-            setEphemeralElement({
-              ...event.block,
-              text: currentText
-            });
-            await new Promise((resolve) => setTimeout(resolve, 55));
-          }
-          setEphemeralElement(null);
-          addAiElement(event.block);
-          break;
-        }
-        case "comment_reply":
-          appendCommentReply(event.commentId, event.text);
-          break;
-        case "set_palette":
-          setPaletteIndex(event.index);
+        case "block":
+          await animateBlockEvent(event.block);
           break;
         default:
           break;
@@ -304,19 +201,20 @@ export function DrawApp() {
     });
   };
 
-  const finalizeTurn = (summary: string, nextUsage?: { used: number; limit: number }) => {
+  const finalizeTurn = (summary: string, usage?: typeof sessionUsage) => {
     animationChainRef.current = animationChainRef.current.then(async () => {
+      const currentUsage = useDrawStore.getState().sessionUsage;
       setAiSummary(summary);
-      addHistoryEntry({
-        id: createId("turn"),
-        role: "ai",
-        summary,
-        createdAt: Date.now()
+      addHistoryEntry(buildAiTurnHistoryEntry(summary));
+      markSyncedState(getCurrentSyncState());
+      setSessionUsage({
+        ...(currentUsage ?? {}),
+        ...(usage ?? {})
       });
-      checkpointAiState();
-      setUsage(nextUsage ?? usage);
-      setTurnState("idle");
-      setEphemeralElement(null);
+      completeModelTurn(summary);
+      setActiveAnimation(null);
+      await sleep(120);
+      clearAiCursor();
     });
   };
 
@@ -330,41 +228,100 @@ export function DrawApp() {
         | null;
 
       if (response.status === 429 && payload?.usage) {
-        setUsage(payload.usage);
+        setSessionUsage(payload.usage);
         setUsageBanner(`Daily quota reached: ${payload.usage.used}/${payload.usage.limit}`);
       }
 
       throw new Error(payload?.error ?? `Request failed with ${response.status}`);
     }
 
-    setTurnState("modelStreaming");
-    await parseNdjsonStream<DrawStreamEvent>(response.body, async (event) => {
-      const translatedEvent = translateSnapshotEvent(
-        event,
+    beginModelStreaming();
+    await parseNdjsonStream(response.body, async (incomingEvent) => {
+      const event = translateStreamEvent(
+        incomingEvent,
         snapshotOrigin.x,
         snapshotOrigin.y
       );
 
-      switch (translatedEvent.type) {
+      switch (event.type) {
         case "thinking":
-          setThinkingText(translatedEvent.text);
+          setThinkingText(event.text);
+          break;
+        case "narration":
+          setNarration(event.text);
+          break;
+        case "preview_saw":
+          setPreviewSaw(event.saw);
+          break;
+        case "preview_drawing":
+          setPreviewDrawing(event.drawing);
+          break;
+        case "interaction_style":
+          setInteractionStyle(event.style);
+          break;
+        case "set_palette":
+          setPaletteIndex(event.index);
+          break;
+        case "say_start":
+          setSpeechDraft({
+            text: "",
+            x: event.sayX,
+            y: event.sayY,
+            replyToId: event.replyToId
+          });
+          if (typeof event.sayX === "number" && typeof event.sayY === "number") {
+            updateAiCursor(
+              { x: event.sayX, y: event.sayY },
+              "speaking",
+              palette[1]
+            );
+          }
+          break;
+        case "say_chunk":
+          appendSpeechDraft(event.text);
           break;
         case "say":
-          setNarration(translatedEvent.text);
+          setSpeechDraft({
+            text: event.text,
+            x: event.sayX,
+            y: event.sayY,
+            replyToId: event.replyToId
+          });
+          setNarration(event.text);
+          if (event.replyToId) {
+            appendCommentReply(event.replyToId, event.text);
+            setActiveCommentId(event.replyToId);
+          }
           break;
-        case "stroke":
+        case "dismiss":
+          clearSpeechDraft();
+          dismissCommentThread(event.threadId);
+          break;
         case "shape":
-        case "ascii_block":
-        case "comment_reply":
-        case "set_palette":
-          queueAnimation(translatedEvent);
+        case "block":
+          queueAnimation(event);
+          break;
+        case "source":
+          setAiSource(event.value);
+          break;
+        case "usage":
+          {
+            const currentUsage = useDrawStore.getState().sessionUsage;
+          setSessionUsage({
+            ...(currentUsage ?? {}),
+            inputTokens: event.inputTokens,
+            outputTokens: event.outputTokens
+          });
+          }
           break;
         case "done":
-          finalizeTurn(translatedEvent.summary, translatedEvent.usage);
+          finalizeTurn(event.summary, event.usage);
           break;
         case "error":
-          setTurnState("idle");
-          setErrorMessage(translatedEvent.message);
+          failTurn();
+          setErrorMessage(event.message);
+          clearAiCursor();
+          setActiveAnimation(null);
           break;
       }
     });
@@ -379,28 +336,52 @@ export function DrawApp() {
       return;
     }
 
-    const snapshot = canvasRef.current?.captureSnapshot({
-      maxWidth: 640,
-      maxHeight: 400,
-      mimeType: "image/jpeg",
-      quality: 0.72
-    });
     const metrics = canvasRef.current?.getCanvasMetrics();
-    if (!snapshot || !metrics) {
+    if (!canvasRef.current || !metrics) {
       setErrorMessage("Canvas export is not ready yet.");
       return;
     }
 
-    setTurnState("awaitingModel");
-    clearThinkingMessages();
-    setThinkingText("");
-    setAiSummary(null);
-    setNarration("");
+    beginModelRequest();
+    clearSpeechDraft();
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    updateAiCursor(
+      {
+        x: metrics.originX + metrics.width * 0.16,
+        y: metrics.originY + metrics.height * 0.18
+      },
+      "watching",
+      palette[1]
+    );
 
     try {
+      const [snapshot, focusImage] = await Promise.all([
+        canvasRef.current.captureSnapshot({
+          maxWidth: 1280,
+          maxHeight: 896,
+          mimeType: "image/jpeg",
+          quality: 0.9
+        }),
+        canvasRef.current.captureFocusSnapshot({
+          maxWidth: 1024,
+          maxHeight: 1024,
+          mimeType: "image/jpeg",
+          quality: 0.92,
+          padding: 96
+        })
+      ]);
+
+      const shouldSendFullState =
+        !lastSyncedState || turnCount === 0 || turnCount % 3 === 0;
+      const diff = computeDrawingDiff(lastSyncedState, syncState);
+
+      setDebugInfo({
+        hasFocusImage: Boolean(focusImage),
+        turnMode: targetCommentId ? "comment" : "turn"
+      });
+
       const response = await fetch(
         targetCommentId ? "/api/draw/comment" : "/api/draw/turn",
         {
@@ -409,31 +390,24 @@ export function DrawApp() {
             "Content-Type": "application/json"
           },
           body: JSON.stringify({
-            snapshotBase64: snapshot,
+            image: snapshot,
+            focusImage,
             canvasWidth: metrics.width,
             canvasHeight: metrics.height,
-            activeStrokeSize: strokeSize,
-            palette,
-            aiTemperature,
-            aiMaxOutputTokens,
-            humanDelta: translateHumanContext(
-              getCanvasHumanContext(elements, 24),
-              metrics.originX,
-              metrics.originY
-            ),
-            aiDelta: translateAiContext(
-              getRecentAiContext(elements, 4),
-              metrics.originX,
-              metrics.originY
-            ),
-            comments: translateComments(
-              comments,
-              metrics.originX,
-              metrics.originY
-            ),
-            turnHistory: turnHistory.slice(-8),
-            mode: targetCommentId ? "comment" : "turn",
-            targetCommentId
+            history: turnHistory.slice(-12),
+            comments,
+            elements: shouldSendFullState ? syncState : undefined,
+            diff: !shouldSendFullState && diffHasChanges(diff) ? diff : undefined,
+            turnCount,
+            drawMode: targetCommentId ? "comment" : "turn",
+            paletteColors: palette,
+            paletteIndex,
+            thinkingEnabled: true,
+            targetCommentId,
+            providerOptions: {
+              temperature: aiTemperature,
+              maxOutputTokens: aiMaxOutputTokens
+            }
           }),
           signal: controller.signal
         }
@@ -446,14 +420,18 @@ export function DrawApp() {
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
         setAiSummary("Stopped the turn.");
-        setTurnState("idle");
+        completeModelTurn("Stopped the turn.", { incrementTurnCount: false });
+        clearAiCursor();
+        setActiveAnimation(null);
         return;
       }
 
+      failTurn();
       setErrorMessage(
         error instanceof Error ? error.message : "Failed to stream the turn."
       );
-      setTurnState("idle");
+      clearAiCursor();
+      setActiveAnimation(null);
     }
   };
 
@@ -464,11 +442,7 @@ export function DrawApp() {
       }
 
       const tagName = target.tagName.toLowerCase();
-      return (
-        tagName === "input" ||
-        tagName === "textarea" ||
-        target.isContentEditable
-      );
+      return tagName === "input" || tagName === "textarea" || target.isContentEditable;
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -514,13 +488,15 @@ export function DrawApp() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keydown", handleEscape);
     };
-  }, [isLoading, sendTurn, setStrokeSize, setTool, strokeSize]);
+  }, [isLoading, setStrokeSize, setTool, strokeSize]);
 
   const stopTurn = () => {
     abortRef.current?.abort();
     abortRef.current = null;
-    setTurnState("idle");
-    setEphemeralElement(null);
+    completeModelTurn("Stopped the turn.", { incrementTurnCount: false });
+    clearAiCursor();
+    clearSpeechDraft();
+    setActiveAnimation(null);
   };
 
   const handlePrimaryAction = () => {
@@ -539,8 +515,12 @@ export function DrawApp() {
           <Header
             turnState={turnState}
             clearCanvas={clearBoard}
-            thinkingMessages={thinkingMessages}
+            thinkingText={thinkingText}
+            previewSaw={previewSaw}
+            previewDrawing={previewDrawing}
             aiSummary={aiSummary}
+            aiSource={aiSource}
+            debugInfo={debugInfo}
             setAiSummary={setAiSummary}
             onToggleSettings={() => setSettingsOpen((open) => !open)}
             settingsOpen={settingsOpen}
@@ -559,17 +539,20 @@ export function DrawApp() {
 
           <DrawCanvas
             ref={canvasRef}
-            elements={elements}
+            humanStrokes={humanStrokes}
             currentStroke={currentStroke}
-            ephemeralElement={ephemeralElement}
+            drawingElements={drawingElements}
+            asciiBlocks={asciiBlocks}
+            activeAnimation={activeAnimation}
             comments={comments}
             activeCommentId={activeCommentId}
             commentComposer={commentComposer}
+            speechDraft={speechDraft}
+            aiCursor={aiCursor}
             tool={tool}
             strokeColor={strokeColor}
             backgroundMode={backgroundMode}
             loading={isLoading}
-            narration={narration}
             onStartStroke={beginStroke}
             onMoveStroke={appendStrokePoint}
             onEndStroke={() => {
@@ -583,56 +566,56 @@ export function DrawApp() {
               submitCommentComposer();
             }}
             onCommentComposerClose={closeCommentComposer}
-            onAskAiAboutComment={(commentId) => sendTurn(commentId)}
+            onAskAiAboutComment={(commentId) => void sendTurn(commentId)}
           />
 
           {settingsOpen ? (
             <div className="draw-settings-popover">
-                <div className="draw-settings-popover__head">
-                  <strong>Generation</strong>
-                  <button
-                    type="button"
-                    className="draw-settings-popover__toggle"
-                    onClick={() => setSettingsOpen(false)}
-                    aria-label="Close settings"
-                  >
-                    hide
-                  </button>
-                </div>
+              <div className="draw-settings-popover__head">
+                <strong>Generation</strong>
+                <button
+                  type="button"
+                  className="draw-settings-popover__toggle"
+                  onClick={() => setSettingsOpen(false)}
+                  aria-label="Close settings"
+                >
+                  hide
+                </button>
+              </div>
 
-                <label className="draw-slider-field">
-                  <span>
-                    Temperature
-                    <em>{aiTemperature.toFixed(2)}</em>
-                  </span>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={aiTemperature}
-                    onChange={(event) =>
-                      setAiTemperature(Number(event.currentTarget.value))
-                    }
-                  />
-                </label>
+              <label className="draw-slider-field">
+                <span>
+                  Temperature
+                  <em>{aiTemperature.toFixed(2)}</em>
+                </span>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={aiTemperature}
+                  onChange={(event) =>
+                    setAiTemperature(Number(event.currentTarget.value))
+                  }
+                />
+              </label>
 
-                <label className="draw-slider-field">
-                  <span>
-                    Output Tokens
-                    <em>{aiMaxOutputTokens}</em>
-                  </span>
-                  <input
-                    type="range"
-                    min="512"
-                    max="8192"
-                    step="256"
-                    value={aiMaxOutputTokens}
-                    onChange={(event) =>
-                      setAiMaxOutputTokens(Number(event.currentTarget.value))
-                    }
-                  />
-                </label>
+              <label className="draw-slider-field">
+                <span>
+                  Output Tokens
+                  <em>{aiMaxOutputTokens}</em>
+                </span>
+                <input
+                  type="range"
+                  min="256"
+                  max="8192"
+                  step="256"
+                  value={aiMaxOutputTokens}
+                  onChange={(event) =>
+                    setAiMaxOutputTokens(Number(event.currentTarget.value))
+                  }
+                />
+              </label>
             </div>
           ) : null}
 
@@ -741,20 +724,29 @@ export function DrawApp() {
                 <span className="draw-send-button__icon" aria-hidden="true">
                   <TwinkleClusterIcon className="draw-send-button__twinkle" />
                 </span>
-                <strong>{isLoading ? "Thinking..." : "Send to Gemini"}</strong>
+                <strong>{isLoading ? "Stop turn" : "Send collaborator turn"}</strong>
               </button>
             </div>
           </div>
 
-          {usage ? (
+          {sessionUsage ? (
             <div className="draw-usage-float">
               <span>
-                daily {usage.used}/{usage.limit}
+                {sessionUsage.used && sessionUsage.limit
+                  ? `daily ${sessionUsage.used}/${sessionUsage.limit}`
+                  : "session"}
               </span>
+              {sessionUsage.inputTokens || sessionUsage.outputTokens ? (
+                <strong>
+                  {sessionUsage.inputTokens ?? 0}/{sessionUsage.outputTokens ?? 0} tok
+                </strong>
+              ) : null}
             </div>
           ) : null}
           {errorMessage ? <div className="draw-error-toast">{errorMessage}</div> : null}
-          {usageBanner ? <div className="draw-inline-alert draw-inline-alert--floating">{usageBanner}</div> : null}
+          {usageBanner ? (
+            <div className="draw-inline-alert draw-inline-alert--floating">{usageBanner}</div>
+          ) : null}
         </div>
       </section>
     </main>
