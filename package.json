@@ -1,31 +1,27 @@
 {
-  "name": "draw-with-me-gemini",
-  "version": "0.1.0",
+  "name": "draw-with-me",
+  "version": "1.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@clerk/nextjs": "^6.14.4",
-    "@tailwindcss/postcss": "^4.2.2",
-    "@upstash/redis": "^1.34.5",
+    "@fontsource/gaegu": "^5.2.6",
+    "@fontsource/nunito": "^5.2.6",
     "lucide-react": "^0.577.0",
-    "motion": "^12.38.0",
-    "next": "^15.2.4",
-    "postcss": "^8.5.8",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "tailwindcss": "^4.2.2",
-    "zod": "^3.24.2",
-    "zustand": "^5.0.3"
+    "zod": "^3.24.2"
   },
   "devDependencies": {
-    "@types/node": "^22.13.10",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
-    "typescript": "^5.8.2"
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.2"
   }
 }

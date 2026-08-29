@@ -1,186 +1,55 @@
 # Draw With Me
 
-`Draw With Me` is a standalone Next.js drawing app where a human sketches on a canvas and Gemini responds as a drawing collaborator.
+A browser-based drawing board where a person and an AI companion take turns adding editable vector strokes to the same canvas.
 
-The AI does not generate a bitmap image. It reads the scene semantically and the app renders the chosen additions locally as animated sketch strokes.
+## Why it costs the project owner nothing
 
-## What It Does
+This app is a static site with no server, database, project-owned API key, or paid infrastructure. It can be hosted on GitHub Pages. Drawing is always available without an account. When a visitor asks the AI to take a turn, they connect their own OpenRouter account or paste their own OpenRouter key for that browser tab.
 
-- Full-screen whiteboard-style drawing surface
-- Human drawing tools for brush, eraser, text/ascii, and comments
-- AI turn system that watches the canvas and adds its own drawings
-- Live stroke animation for AI output instead of instant stamping
-- Minimal floating UI inspired by collaborative drawing tools
-- Local draft persistence with Zustand
-- Server-side Gemini scene analysis with local sketch rendering
+The default route is `openrouter/free`, which asks OpenRouter to select an available free model. Free model availability and limits belong to OpenRouter and can change. The app never promises unlimited inference and never falls back to a project-funded key.
 
-## Tech Stack
+## Features
 
-- Next.js 15
-- React 19
-- TypeScript
-- Zustand
-- Tailwind CSS 4
-- `motion`
-- Zod
-- Clerk
-- Upstash Redis
+- Mouse, touch, and stylus drawing
+- Pen, eraser, four-color palette, undo, redo, and clear
+- Browser-local persistence with IndexedDB
+- PNG and editable SVG export
+- Point-by-point AI drawing animation
+- OpenRouter OAuth PKCE connection or session-only pasted key
+- Configurable OpenRouter model and AI stroke limit
+- Static GitHub Pages deployment
 
-## AI Architecture
+## How the AI draws
 
-The current AI system treats Gemini as a scene analyst, not a painter.
+The browser sends a snapshot of the current canvas to a vision-capable OpenRouter model and requires a `draw_strokes` tool call. The model returns normalized points, colors, and widths. The browser validates and clamps that response before rendering it as local vector strokes. The model does not replace the canvas with a generated image.
 
-### Request flow
+Because models differ, use a vision-capable model that supports tool calling. `openrouter/free` is the zero-cost default; a visitor can enter a specific free model ID in Settings when the free router does not select a compatible model.
 
-When the user sends a turn, the client sends:
-
-- a compact JPEG snapshot of the canvas
-- canvas width and height
-- active palette
-- recent human marks
-- recent AI marks
-- recent turn summaries
-- optional comment context
-
-### Scene analysis response
-
-Gemini is asked to return strict JSON only. The expected shape is:
-
-```json
-{
-  "scene": "a simple house with two trees",
-  "why": "the page reads as a sparse outdoor home scene",
-  "subjects": [
-    {
-      "id": "subj_house_1",
-      "family": "house",
-      "label": "house",
-      "bbox": {
-        "x": 220,
-        "y": 180,
-        "width": 260,
-        "height": 240
-      }
-    }
-  ],
-  "additions": [
-    {
-      "id": "add_1",
-      "family": "chimney",
-      "targetSubjectId": "subj_house_1",
-      "relation": "attach_roof_right",
-      "reason": "adds a lived-in roof detail",
-      "priority": 1
-    }
-  ]
-}
-```
-
-### Rendering
-
-Server-side code validates and sanitizes the scene analysis, then the local sketch renderer turns the additions into internal stroke events:
-
-- addition families are normalized to local sketch recipes
-- placement is resolved against detected subjects and semantic relations
-- rendered strokes are streamed to the client as NDJSON
-- the frontend animates those events point-by-point so the AI appears to draw live on the canvas
-
-## Project Structure
-
-```text
-app/
-  api/draw/comment/route.ts
-  api/draw/loading-messages/route.ts
-  api/draw/turn/route.ts
-  draw/page.tsx
-
-components/draw/
-  draw-app.tsx
-  draw-canvas.tsx
-  header.tsx
-  text-cursor-icon.tsx
-  auth-controls.tsx
-
-lib/
-  ai.ts
-  auth.ts
-  draw-server.ts
-  draw-store.ts
-  draw-types.ts
-  draw-utils.ts
-  loading-messages.ts
-  quota.ts
-```
-
-## Getting Started
-
-### 1. Install dependencies
+## Local development
 
 ```bash
 npm install
-```
-
-### 2. Create your env file
-
-Copy `.env.example` to `.env.local` and fill in the values you need.
-
-```bash
-cp .env.example .env.local
-```
-
-Current env vars:
-
-```bash
-GEMINI_API_KEY=
-GEMINI_MODEL=gemini-2.5-flash-lite
-
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
-CLERK_SECRET_KEY=
-
-UPSTASH_REDIS_REST_URL=
-UPSTASH_REDIS_REST_TOKEN=
-```
-
-## Local Development
-
-Run the app:
-
-```bash
 npm run dev
 ```
 
-Open:
-
-- `http://localhost:3000/`
-- `http://localhost:3000/draw`
-
-### Auth behavior in local dev
-
-If Clerk keys are not configured and the app is running in local development, the server uses a local dev auth bypass so AI turns can still work without sign-in.
-
-In production, Clerk auth is expected.
-
-## Scripts
-
-```bash
-npm run dev
-npm run build
-npm run start
-npm run typecheck
-```
-
-## Current Notes
-
-- Gemini calls stay server-side.
-- The AI is optimized for structured drawing actions, not image generation.
-- The app prefers restrained collaboration, but the prompt currently encourages scene-aware additions when the drawing is sparse.
-- Upstash Redis is optional in local use. If it is not configured, quota handling falls back in memory.
-
-## Verification
-
-Current project checks:
+No environment file is required. Production checks:
 
 ```bash
 npm run typecheck
 npm run build
 ```
+
+## GitHub Pages
+
+`pnpm build` writes the production site to the committed `docs/` folder. After merging, open the repository settings and set **Pages → Source** to **Deploy from a branch**, then choose **main** and **/docs**. This uses GitHub Pages directly and does not require a server or Actions workflow.
+
+## Privacy and keys
+
+- OAuth or pasted OpenRouter keys are kept in `sessionStorage`.
+- Keys are not written to IndexedDB, URLs, exports, logs, analytics, or the repository.
+- Canvas strokes and non-secret settings stay in the visitor's browser.
+- There is no project backend that can observe or store drawings.
+
+## License
+
+Add the license you want before publishing. MIT is a common choice for small public web projects.

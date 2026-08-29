@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-29T00:00:00.000Z",
+  "title": "Design System: Draw With Me",
+  "extensions": {
+    "colorMeta": {
+      "studio-sage": { "role": "primary", "displayName": "Studio Sage", "tonalRamp": ["#16211d", "#2d4038", "#526b5d", "#6f8b7f", "#84a59d", "#a9c0b8", "#d2dfda", "#f1f6f4"] },
+      "companion-coral": { "role": "secondary", "displayName": "Companion Coral", "tonalRamp": ["#2d1712", "#592e24", "#8c4939", "#bd624d", "#e07a5f", "#eca38f", "#f5cbbf", "#fdf1ed"] },
+      "pencil-mustard": { "role": "tertiary", "displayName": "Pencil Mustard", "tonalRamp": ["#2b2008", "#5b4310", "#8b671d", "#bd8c2d", "#f2b84b", "#f6cd7b", "#fae2ae", "#fff6df"] },
+      "warm-paper": { "role": "neutral", "displayName": "Warm Paper", "tonalRamp": ["#292723", "#4d4942", "#746f65", "#9f988c", "#c9c2b6", "#e8e2d8", "#f7f2e9", "#fffdf7"] },
+      "companion-eggplant": { "role": "secondary", "displayName": "Companion Eggplant", "tonalRamp": ["#15151d", "#282a3a", "#3d405b", "#5a5e7c", "#797d9d", "#a0a3bb", "#cacbd8", "#f0f0f5"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Hand-lettered Display", "purpose": "Board and settings titles only." },
+      "body": { "displayName": "Friendly Body", "purpose": "Explanations and status." },
+      "label": { "displayName": "Control Label", "purpose": "Actions, fields, and connection state." }
+    },
+    "shadows": [
+      { "name": "board-lift", "value": "0 14px 34px rgba(32,28,23,.34)", "purpose": "Separates the full board object from the viewport edge." },
+      { "name": "rail-lift", "value": "0 13px 24px rgba(39,29,23,.38)", "purpose": "Places the instrument rail in front of the paper." },
+      { "name": "control-lift", "value": "0 7px 13px rgba(37,47,41,.3)", "purpose": "Makes the AI turn feel pressable." }
+    ],
+    "motion": [
+      { "name": "companion-turn", "value": "1.1s ease-in-out", "purpose": "A restrained rotation and scale pulse while the model prepares strokes." },
+      { "name": "stroke-reveal", "value": "18ms per two points", "purpose": "Makes AI marks appear as a turn rather than a stamped result." }
+    ],
+    "breakpoints": [
+      { "name": "compact-rail", "value": "900px" },
+      { "name": "phone", "value": "560px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "AI Turn",
+      "kind": "button",
+      "refersTo": "ai-turn",
+      "description": "The single prominent action that hands the canvas to the companion.",
+      "html": "<button class=\"ds-ai-turn\">AI turn</button>",
+      "css": ".ds-ai-turn{min-width:174px;height:70px;padding:0 24px;border:0;border-radius:14px;background:#354c40;color:#fffdf7;font:700 17px Nunito,sans-serif;box-shadow:0 7px 13px rgba(37,47,41,.3);cursor:pointer}.ds-ai-turn:hover{background:#405b4d;transform:translateY(-1px)}.ds-ai-turn:active{transform:translateY(2px)}.ds-ai-turn:focus-visible{outline:3px solid #172b22;outline-offset:3px}"
+    },
+    {
+      "name": "Connection Chip",
+      "kind": "chip",
+      "refersTo": "connection-chip",
+      "description": "A compact paper-colored action for visitor-owned AI access.",
+      "html": "<button class=\"ds-connection\">Connect AI</button>",
+      "css": ".ds-connection{height:44px;padding:0 15px;border:0;border-radius:999px;background:#e7eadc;color:#2f3d35;font:700 14px Nunito,sans-serif;box-shadow:0 4px 9px rgba(44,55,47,.23)}.ds-connection:hover{transform:translateY(-1px)}.ds-connection:focus-visible{outline:3px solid #172b22;outline-offset:3px}"
+    },
+    {
+      "name": "Color Well",
+      "kind": "custom",
+      "refersTo": "color-well",
+      "description": "A physical circular pencil-color selector.",
+      "html": "<button class=\"ds-color-well\" aria-label=\"Coral pencil\"></button>",
+      "css": ".ds-color-well{width:56px;height:56px;border:0;border-radius:50%;background:#e07a5f;box-shadow:0 4px 8px rgba(68,50,40,.25),inset 0 0 0 4px rgba(255,255,255,.66);cursor:pointer}.ds-color-well:hover{transform:translateY(-2px)}.ds-color-well:focus-visible{outline:3px solid #172b22;outline-offset:3px}"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "text-input",
+      "description": "The warm, restrained field used inside the settings sheet.",
+      "html": "<input class=\"ds-input\" value=\"openrouter/free\" />",
+      "css": ".ds-input{width:280px;height:48px;padding:0 12px;border:1px solid #b8a99e;border-radius:10px;background:#fffefd;color:#332d28;font:400 16px Nunito,sans-serif}.ds-input:focus-visible{outline:3px solid #172b22;outline-offset:3px}"
+    },
+    {
+      "name": "Tool Rail",
+      "kind": "nav",
+      "description": "The blush physical tray that holds every drawing and utility action.",
+      "html": "<nav class=\"ds-rail\"><span>Tools</span><button>AI turn</button></nav>",
+      "css": ".ds-rail{display:flex;align-items:center;gap:16px;min-height:100px;padding:12px 16px;border-radius:18px;background:#f3dfd5;color:#332d28;font:700 16px Nunito,sans-serif;box-shadow:0 13px 24px rgba(39,29,23,.38)}.ds-rail button{margin-left:auto;padding:14px 22px;border:0;border-radius:14px;background:#354c40;color:#fffdf7}.ds-rail button:focus-visible{outline:3px solid #172b22;outline-offset:3px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Friendly Drawing Table",
+    "overview": "The interface turns the viewport into one inviting object: a softly illustrated drafting board. Warm paper, a sage frame, a blush tool rail, and slightly irregular lettering create a quiet studio feeling without depicting a room. The canvas carries nearly all visual weight; controls feel like physical implements placed within reach. The world is tactile but restrained.",
+    "keyCharacteristics": ["One board fills the viewport.", "Warm, muted art-supply colors replace software chrome.", "Handwritten display type is reserved for moments of invitation.", "The AI turn feels like pressing a studio control and watching another hand draw."],
+    "rules": [
+      { "name": "The Art-Supply Rule", "body": "Every strong color must plausibly belong to a pencil, eraser, paper, wood, or painted board; generic app-blue is outside this world.", "section": "colors" },
+      { "name": "The One Handwritten Voice Rule", "body": "Use Gaegu for titles and invitation moments only; functional controls stay in Nunito.", "section": "typography" },
+      { "name": "The Real Layer Rule", "body": "Add elevation only where one functional surface physically sits above another.", "section": "elevation" }
+    ],
+    "dos": ["Do keep the drawing paper as the largest and brightest surface.", "Do express actions through consistent line icons and plain-language labels.", "Do preserve downward, ambient depth and lightly varied paper/paint texture.", "Do let status copy sound like a quiet drawing partner."],
+    "donts": ["Don't add plants, lamps, shelves, wall art, flooring, or any surrounding room scene.", "Don't turn the experience into a dashboard, landing page, or professional editor shell.", "Don't use gradient text, emoji icons, generic app-blue, glass panels, or decorative badges.", "Don't let the AI action overpower the paper or obscure a drawing."]
+  }
+}
