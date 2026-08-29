@@ -28,15 +28,15 @@ Because models differ, use a vision-capable model that supports tool calling. `o
 ## Local development
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 No environment file is required. Production checks:
 
 ```bash
-npm run typecheck
-npm run build
+pnpm typecheck
+pnpm build
 ```
 
 ## GitHub Pages
