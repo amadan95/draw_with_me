@@ -148,7 +148,7 @@ export default function App() {
 
   return (
     <main className="studio-board">
-      <section className="paper-frame" aria-label="Shared drawing board">
+      <section className="grid-surface" aria-label="Shared drawing grid">
         <div className="board-heading">
           <h1>Draw With Me</h1>
           <button className={`connection-chip ${key ? 'connected' : ''}`} onClick={openSettings} aria-label="Open AI connection settings">
@@ -156,7 +156,7 @@ export default function App() {
             <span>{key ? 'AI ready' : 'Connect AI'}</span>
           </button>
         </div>
-        <div className="paper">
+        <div className="drawing-grid">
           <DrawingCanvas ref={canvasRef} strokes={strokes} tool={tool} color={color} disabled={thinking} onCommit={addStroke} onErase={eraseAt} />
           {!strokes.length && (
             <div className="empty-hint" aria-hidden="true">

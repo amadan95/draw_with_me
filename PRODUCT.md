@@ -38,7 +38,7 @@ Visitors draw with a mouse, touch, or stylus, then explicitly invite the AI to t
 
 ## Brand Commitments
 
-The working name is **Draw With Me**. The interface should feel quiet, tactile, curious, and companionable. The selected visual direction is a warm illustrated drafting board with a physical tool rail, cropped to fill the entire viewport. The board and toolbar are the whole world: no room, plants, lamp, shelves, wall art, floor, or surrounding scene. The provided Lele Zhang drawing experience is a binding interaction reference, but this project must use an original visual identity and original assets.
+The working name is **Draw With Me**. The interface should feel quiet, tactile, curious, and companionable. The selected visual direction is a continuous warm-paper drawing grid with a physical tool rail floating above it. The grid and toolbar are the whole world: no closed paper boundary, room, plants, lamp, shelves, wall art, floor, or surrounding scene. The provided Lele Zhang drawing experience is a binding interaction reference, but this project must use an original visual identity and original assets.
 
 ## Evidence on Hand
 

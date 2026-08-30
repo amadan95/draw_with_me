@@ -1,6 +1,6 @@
 ---
 name: Draw With Me
-description: A warm, tactile drawing board for human-and-AI sketch turns.
+description: A warm, continuous drawing grid for human-and-AI sketch turns.
 colors:
   studio-sage: "#84a59d"
   studio-sage-dark: "#526b5d"
@@ -11,7 +11,6 @@ colors:
   warm-paper: "#fffdf7"
   blush-rail: "#f3dfd5"
   graphite-ink: "#332d28"
-  frame-wood: "#8a5f43"
 typography:
   display:
     fontFamily: "Gaegu, cursive"
@@ -29,13 +28,11 @@ rounded:
   paper: "5px"
   control: "12px"
   rail: "18px"
-  frame: "22px"
   round: "999px"
 spacing:
   tight: "8px"
   control: "12px"
   group: "16px"
-  frame: "32px"
 components:
   ai-turn:
     backgroundColor: "{colors.studio-sage-deep}"
@@ -63,13 +60,13 @@ components:
 
 **Creative North Star: "The Friendly Drawing Table"**
 
-The interface turns the viewport into one inviting object: a softly illustrated drafting board. Warm paper, a sage frame, a blush tool rail, and slightly irregular lettering create a quiet studio feeling without depicting a room. The canvas carries nearly all visual weight; controls feel like physical implements placed within reach.
+The interface turns the viewport into one continuous drawing surface. A warm-paper grid, a floating blush tool rail, sage actions, and slightly irregular lettering create a quiet studio feeling without depicting a room or enclosing the canvas. The grid carries nearly all visual weight; controls feel like physical implements placed within reach.
 
 The world is tactile but restrained. Texture is fine and low-contrast, depth has a visible downward offset, and ornament comes from useful objects rather than decorative scenery.
 
 **Key Characteristics:**
 
-- One board fills the viewport.
+- One uninterrupted grid fills the viewport.
 - Warm, muted art-supply colors replace software chrome.
 - Handwritten display type is reserved for moments of invitation.
 - The AI turn feels like pressing a studio control and watching another hand draw.
@@ -80,7 +77,7 @@ The palette combines muted sage structure with warm paper and a small set of rec
 
 ### Primary
 
-- **Studio Sage:** The frame and selected drawing color; calm enough to surround a long sketching session.
+- **Studio Sage:** A selected drawing color and structural accent; calm enough for a long sketching session.
 - **Deep Studio Sage:** The AI-turn action and strongest control emphasis.
 
 ### Secondary
@@ -92,9 +89,8 @@ The palette combines muted sage structure with warm paper and a small set of rec
 ### Neutral
 
 - **Warm Paper:** The canvas and bright control surfaces.
-- **Blush Rail:** The toolbar surface that separates tools from the sage frame.
+- **Blush Rail:** The toolbar surface that separates tools from the continuous paper grid.
 - **Graphite Ink:** Body copy and functional icon color.
-- **Frame Wood:** The narrow structural edge around the board.
 
 **The Art-Supply Rule.** Every strong color must plausibly belong to a pencil, eraser, paper, wood, or painted board; generic app-blue is outside this world.
 
@@ -108,7 +104,7 @@ The palette combines muted sage structure with warm paper and a small set of rec
 
 ### Hierarchy
 
-- **Display** (700, responsive clamp, 0.9 line-height): the single board title and settings-sheet title.
+- **Display** (700, responsive clamp, 0.9 line-height): the single grid title and settings-sheet title.
 - **Body** (400, normal size): explanations, privacy copy, and status messages.
 - **Label** (700): actions, fields, and compact connection state.
 
@@ -116,26 +112,24 @@ The palette combines muted sage structure with warm paper and a small set of rec
 
 ## Layout
 
-The product is a single full-viewport object. On wide screens, the framed paper occupies the area above a centered horizontal rail. At 900px and below, the rail becomes a two-row instrument tray; drawing tools and color wells remain on top, while utilities and the AI turn move below. The paper never becomes a card inside a page, and the viewport never reveals a surrounding room.
+The product is a single full-viewport grid with no enclosing edge. A centered horizontal rail floats near the bottom while the grid continues behind it. At 900px and below, the rail becomes a two-row instrument tray; drawing tools and color wells remain on top, while utilities and the AI turn move below. The canvas never becomes a card inside a page, and the viewport never reveals a surrounding room.
 
-Spacing follows four recurring steps: tight control gaps, internal control padding, group separation, and broad frame inset. Touch targets remain at least 44px.
+Spacing follows three recurring steps: tight control gaps, internal control padding, and group separation. Touch targets remain at least 44px.
 
 ## Elevation & Depth
 
-Depth is structural: the wood frame, paper, rail, controls, and dialog each cast a soft shadow with a downward offset. Fine radial texture is limited to the sage board and paper surfaces. Shadows should describe layers, never form zero-offset glows.
+Depth is structural: the continuous grid stays flat while the rail, controls, status label, and dialog cast soft shadows with a downward offset. Fine radial texture remains within the paper surface. Shadows should describe layers, never form zero-offset glows.
 
 ### Shadow Vocabulary
 
-- **Board lift:** broad, low-opacity shadow below the wood frame.
-- **Paper lift:** smaller shadow that separates paper from sage.
-- **Rail lift:** strongest ambient shadow because the rail sits in front of the board.
+- **Rail lift:** strongest ambient shadow because the rail sits in front of the grid.
 - **Pressed control:** reduced vertical shadow and a 2px downward movement.
 
 **The Real Layer Rule.** Add elevation only where one functional surface physically sits above another.
 
 ## Shapes
 
-The outer board uses generous 22px corners, the rail 18px, and ordinary controls 10–14px. Color wells and connection chips are fully round because they behave like physical swatches and compact status controls. Paper corners remain nearly square so the canvas reads as a sheet, not a card.
+The grid has no outer silhouette or corner. The rail uses 18px corners and ordinary controls use 10–14px. Color wells and connection chips are fully round because they behave like physical swatches and compact status controls.
 
 ## Components
 
@@ -152,7 +146,7 @@ The outer board uses generous 22px corners, the rail 18px, and ordinary controls
 
 ### Cards / Containers
 
-- **Board:** Sage field, wood edge, inset paper, and structural shadow; it is the whole viewport rather than a reusable content card.
+- **Grid:** Warm paper with quiet 32px sage lines and subtle fiber variation; it extends edge to edge behind every control.
 - **Settings sheet:** Warm paper with 16px corners and a protected-focus backdrop.
 
 ### Inputs / Fields
@@ -179,7 +173,7 @@ Round 56px swatches shrink responsively to 34–43px. The active well gains a wa
 
 ### Don't:
 
-- **Don't** add plants, lamps, shelves, wall art, flooring, or any surrounding room scene.
+- **Don't** add a closed paper boundary, frame, plants, lamps, shelves, wall art, flooring, or any surrounding room scene.
 - **Don't** turn the experience into a dashboard, landing page, or professional editor shell.
 - **Don't** use gradient text, emoji icons, generic app-blue, glass panels, or decorative badges.
 - **Don't** let the AI action overpower the paper or obscure a drawing.

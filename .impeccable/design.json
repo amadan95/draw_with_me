@@ -11,12 +11,11 @@
       "companion-eggplant": { "role": "secondary", "displayName": "Companion Eggplant", "tonalRamp": ["#15151d", "#282a3a", "#3d405b", "#5a5e7c", "#797d9d", "#a0a3bb", "#cacbd8", "#f0f0f5"] }
     },
     "typographyMeta": {
-      "display": { "displayName": "Hand-lettered Display", "purpose": "Board and settings titles only." },
+      "display": { "displayName": "Hand-lettered Display", "purpose": "Grid and settings titles only." },
       "body": { "displayName": "Friendly Body", "purpose": "Explanations and status." },
       "label": { "displayName": "Control Label", "purpose": "Actions, fields, and connection state." }
     },
     "shadows": [
-      { "name": "board-lift", "value": "0 14px 34px rgba(32,28,23,.34)", "purpose": "Separates the full board object from the viewport edge." },
       { "name": "rail-lift", "value": "0 13px 24px rgba(39,29,23,.38)", "purpose": "Places the instrument rail in front of the paper." },
       { "name": "control-lift", "value": "0 7px 13px rgba(37,47,41,.3)", "purpose": "Makes the AI turn feel pressable." }
     ],
@@ -72,14 +71,14 @@
   ],
   "narrative": {
     "northStar": "The Friendly Drawing Table",
-    "overview": "The interface turns the viewport into one inviting object: a softly illustrated drafting board. Warm paper, a sage frame, a blush tool rail, and slightly irregular lettering create a quiet studio feeling without depicting a room. The canvas carries nearly all visual weight; controls feel like physical implements placed within reach. The world is tactile but restrained.",
-    "keyCharacteristics": ["One board fills the viewport.", "Warm, muted art-supply colors replace software chrome.", "Handwritten display type is reserved for moments of invitation.", "The AI turn feels like pressing a studio control and watching another hand draw."],
+    "overview": "The interface turns the viewport into one continuous drawing surface. A warm-paper grid, a floating blush tool rail, sage actions, and slightly irregular lettering create a quiet studio feeling without depicting a room or enclosing the canvas. The grid carries nearly all visual weight; controls feel like physical implements placed within reach.",
+    "keyCharacteristics": ["One uninterrupted grid fills the viewport.", "Warm, muted art-supply colors replace software chrome.", "Handwritten display type is reserved for moments of invitation.", "The AI turn feels like pressing a studio control and watching another hand draw."],
     "rules": [
       { "name": "The Art-Supply Rule", "body": "Every strong color must plausibly belong to a pencil, eraser, paper, wood, or painted board; generic app-blue is outside this world.", "section": "colors" },
       { "name": "The One Handwritten Voice Rule", "body": "Use Gaegu for titles and invitation moments only; functional controls stay in Nunito.", "section": "typography" },
       { "name": "The Real Layer Rule", "body": "Add elevation only where one functional surface physically sits above another.", "section": "elevation" }
     ],
     "dos": ["Do keep the drawing paper as the largest and brightest surface.", "Do express actions through consistent line icons and plain-language labels.", "Do preserve downward, ambient depth and lightly varied paper/paint texture.", "Do let status copy sound like a quiet drawing partner."],
-    "donts": ["Don't add plants, lamps, shelves, wall art, flooring, or any surrounding room scene.", "Don't turn the experience into a dashboard, landing page, or professional editor shell.", "Don't use gradient text, emoji icons, generic app-blue, glass panels, or decorative badges.", "Don't let the AI action overpower the paper or obscure a drawing."]
+    "donts": ["Don't add a closed paper boundary, frame, plants, lamps, shelves, wall art, flooring, or any surrounding room scene.", "Don't turn the experience into a dashboard, landing page, or professional editor shell.", "Don't use gradient text, emoji icons, generic app-blue, glass panels, or decorative badges.", "Don't let the AI action overpower the paper or obscure a drawing."]
   }
 }
