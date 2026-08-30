@@ -31,6 +31,7 @@ Visitors draw with a mouse, touch, or stylus, then explicitly invite the AI to t
 - Public, open-source, low-traffic application hosted on GitHub Pages.
 - No developer-funded inference, guest credits, server runtime, account database, or local-model requirement.
 - `google/gemma-4-31b-it:free` is the default model; visitors can select another compatible OpenRouter model.
+- Specific free-model requests may fail over to a short, named list of compatible free vision models; the application does not use the random free-model router.
 - AI models must accept image input and return tool calls or reliably structured JSON to participate directly.
 - The canvas, history, settings, and credentials remain client-side. API keys must never enter the URL, repository, exports, logs, or analytics.
 - Original, optional sound cues reinforce drawing, erasing, selection, undo/redo, and AI turn-taking without loading third-party media.

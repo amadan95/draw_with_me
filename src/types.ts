@@ -21,6 +21,12 @@ export const COLORS = ['#84a59d', '#e07a5f', '#f2b84b', '#3d405b'] as const
 
 export const DEFAULT_MODEL = 'google/gemma-4-31b-it:free'
 
+export const FREE_MODEL_FALLBACKS = [
+  DEFAULT_MODEL,
+  'google/gemma-4-26b-a4b-it:free',
+  'minimax/minimax-m3:free',
+] as const
+
 export const DEFAULT_SETTINGS: Settings = {
   model: DEFAULT_MODEL,
   creativity: 0.7,

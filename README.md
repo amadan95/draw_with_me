@@ -8,6 +8,8 @@ This app is a static site with no server, database, project-owned API key, or pa
 
 The default model is `google/gemma-4-31b-it:free`, selected for its image understanding and native function calling. Free model availability and limits belong to OpenRouter and can change. The app never promises unlimited inference and never falls back to a project-funded key.
 
+When a selected `:free` model is temporarily unavailable or rate-limited, the request uses a fixed zero-cost fallback sequence: Gemma 4 31B, Gemma 4 26B, then MiniMax M3. This is explicit model fallback, not the `openrouter/free` random router. Account-wide free-request limits still apply.
+
 ## Features
 
 - Mouse, touch, and stylus drawing
