@@ -69,6 +69,7 @@ The world is tactile but restrained. Texture is fine and low-contrast, depth has
 - One uninterrupted grid fills the viewport.
 - Warm, muted art-supply colors replace software chrome.
 - Handwritten display type is reserved for moments of invitation.
+- Pencil and eraser controls read as small illustrated objects resting in the rail.
 - The AI turn feels like pressing a studio control and watching another hand draw.
 
 ## Colors
@@ -158,6 +159,10 @@ The grid has no outer silhouette or corner. The rail uses 18px corners and ordin
 
 The tool rail is the sole navigation surface. Groups are separated by fine tonal dividers; on narrow screens it reflows into two rows without horizontal scrolling.
 
+### Illustrated Tools
+
+The pencil is a tall, sharpened object whose tip reflects the selected color. The eraser is a softly shaded two-material object. Both rise slightly on hover and cast a small downward shadow so they appear to sit in the tray. Their geometry and palette are original; they borrow only the reference experience's object-like tool principle.
+
 ### Color Wells
 
 Round 56px swatches shrink responsively to 34–43px. The active well gains a warm-paper outline and a slightly stronger ambient shadow.
@@ -169,6 +174,7 @@ Round 56px swatches shrink responsively to 34–43px. The active well gains a wa
 - **Do** keep the drawing paper as the largest and brightest surface.
 - **Do** express actions through consistent line icons and plain-language labels.
 - **Do** preserve downward, ambient depth and lightly varied paper/paint texture.
+- **Do** pair visible tool state with optional, quiet synthesized feedback: pencil scratch, eraser rub, selection tap, and AI handoff tones.
 - **Do** let status copy sound like a quiet drawing partner.
 
 ### Don't:
@@ -177,3 +183,4 @@ Round 56px swatches shrink responsively to 34–43px. The active well gains a wa
 - **Don't** turn the experience into a dashboard, landing page, or professional editor shell.
 - **Don't** use gradient text, emoji icons, generic app-blue, glass panels, or decorative badges.
 - **Don't** let the AI action overpower the paper or obscure a drawing.
+- **Don't** require sound to understand state; every cue must have a visible equivalent and a one-click mute control.

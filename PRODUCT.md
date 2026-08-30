@@ -33,6 +33,7 @@ Visitors draw with a mouse, touch, or stylus, then explicitly invite the AI to t
 - OpenRouter Free is the default model route; visitors can select a specific compatible OpenRouter model.
 - AI models must accept image input and return tool calls or reliably structured JSON to participate directly.
 - The canvas, history, settings, and credentials remain client-side. API keys must never enter the URL, repository, exports, logs, or analytics.
+- Original, optional sound cues reinforce drawing, erasing, selection, undo/redo, and AI turn-taking without loading third-party media.
 - Human and AI marks remain distinguishable in state, individually undoable, and editable by the renderer.
 - The application must preserve work across refreshes and handle offline, cancelled, malformed, unavailable, and rate-limited AI turns safely.
 
@@ -49,6 +50,7 @@ The previous implementation in this repository demonstrates a full-screen canvas
 - The canvas is the conversation.
 - The AI adds; it does not overwrite.
 - Drawing begins before configuration.
+- Tool feedback should feel like handling art supplies, not operating generic software.
 - Every remote action has a safe local failure state.
 - The project owner can never receive an AI usage bill from a visitor.
 

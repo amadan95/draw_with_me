@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  ArrowRight, Check, Download, Eraser, FileImage, FileType2, KeyRound, Pencil,
-  Redo2, RotateCcw, Settings as SettingsIcon, Sparkles, Trash2, Undo2, X,
+  ArrowRight, Check, Download, FileImage, FileType2, KeyRound, Pencil,
+  Redo2, RotateCcw, Settings as SettingsIcon, Sparkles, Trash2, Undo2, Volume2, VolumeX, X,
 } from 'lucide-react'
 import { DrawingCanvas, type DrawingCanvasHandle } from './DrawingCanvas'
 import { finishOpenRouterConnect, getOpenRouterKey, requestAiStrokes, setOpenRouterKey, startOpenRouterConnect } from './openrouter'
+import { studioSounds } from './sounds'
 import { loadWorkspace, saveWorkspace } from './storage'
+import { EraserArtwork, PencilArtwork } from './ToolArtwork'
 import { COLORS, DEFAULT_SETTINGS, type Point, type Settings, type Stroke, type Tool } from './types'
 
 const sleep = (milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds))
@@ -51,6 +53,8 @@ export default function App() {
     return () => window.clearTimeout(timer)
   }, [hydrated, settings, strokes])
 
+  useEffect(() => studioSounds.setEnabled(settings.soundEnabled), [settings.soundEnabled])
+
   const replaceStrokes = useCallback((next: Stroke[]) => {
     setPast((history) => [...history.slice(-49), strokes])
     setFuture([])
@@ -72,6 +76,7 @@ export default function App() {
     setStrokes(previous)
     setPast((items) => items.slice(0, -1))
     setStatus('Undid the last mark')
+    studioSounds.undo('undo')
   }
 
   const redo = () => {
@@ -81,6 +86,7 @@ export default function App() {
     setStrokes(next)
     setFuture((items) => items.slice(1))
     setStatus('Brought that mark back')
+    studioSounds.undo('redo')
   }
 
   const clear = () => {
@@ -116,6 +122,7 @@ export default function App() {
     if (!snapshot) return
     setThinking(true)
     setStatus('Your companion is looking…')
+    studioSounds.handoff()
     try {
       const result = await requestAiStrokes(key, snapshot, settings)
       setPast((history) => [...history.slice(-49), strokes])
@@ -133,14 +140,17 @@ export default function App() {
         for (let index = 2; index <= incoming.points.length; index += 2) {
           animated = [...animated.slice(0, -1), { ...incoming, points: incoming.points.slice(0, index) }]
           setStrokes(animated)
+          studioSounds.stroke('pen')
           await sleep(18)
         }
         animated = [...animated.slice(0, -1), incoming]
         setStrokes(animated)
       }
       setStatus(`${result.thought} Your turn.`)
+      studioSounds.returnTurn(true)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'The AI turn failed. Your drawing is safe.')
+      studioSounds.returnTurn(false)
     } finally {
       setThinking(false)
     }
@@ -170,11 +180,11 @@ export default function App() {
 
       <nav className="tool-rail" aria-label="Drawing tools">
         <div className="tool-group drawing-tools">
-          <button className={`tool-button illustrated-pencil ${tool === 'pen' ? 'active' : ''}`} onClick={() => setTool('pen')} aria-label="Pencil" aria-pressed={tool === 'pen'}>
-            <Pencil aria-hidden="true" />
+          <button className={`tool-button illustrated-pencil ${tool === 'pen' ? 'active' : ''}`} onClick={() => { setTool('pen'); studioSounds.selectTool('pen') }} aria-label="Pencil" aria-pressed={tool === 'pen'}>
+            <PencilArtwork color={color} />
           </button>
-          <button className={`tool-button illustrated-eraser ${tool === 'eraser' ? 'active' : ''}`} onClick={() => setTool('eraser')} aria-label="Eraser" aria-pressed={tool === 'eraser'}>
-            <Eraser aria-hidden="true" />
+          <button className={`tool-button illustrated-eraser ${tool === 'eraser' ? 'active' : ''}`} onClick={() => { setTool('eraser'); studioSounds.selectTool('eraser') }} aria-label="Eraser" aria-pressed={tool === 'eraser'}>
+            <EraserArtwork />
           </button>
         </div>
 
@@ -185,7 +195,7 @@ export default function App() {
               key={swatch}
               className={`color-well ${color === swatch ? 'active' : ''}`}
               style={{ '--swatch': swatch } as React.CSSProperties}
-              onClick={() => { setColor(swatch); setTool('pen') }}
+              onClick={() => { setColor(swatch); setTool('pen'); studioSounds.selectColor(COLORS.indexOf(swatch)) }}
               aria-label={`Use ${swatch} pencil`}
               aria-pressed={color === swatch}
             />
@@ -196,6 +206,14 @@ export default function App() {
         <div className="tool-group utilities">
           <button className="small-tool" onClick={undo} disabled={!past.length || thinking} aria-label="Undo"><Undo2 aria-hidden="true" /></button>
           <button className="small-tool" onClick={redo} disabled={!future.length || thinking} aria-label="Redo"><Redo2 aria-hidden="true" /></button>
+          <button
+            className="small-tool"
+            onClick={() => setSettings((current) => ({ ...current, soundEnabled: !current.soundEnabled }))}
+            aria-label={settings.soundEnabled ? 'Mute sound effects' : 'Turn on sound effects'}
+            aria-pressed={settings.soundEnabled}
+          >
+            {settings.soundEnabled ? <Volume2 aria-hidden="true" /> : <VolumeX aria-hidden="true" />}
+          </button>
           <details className="export-menu">
             <summary className="small-tool" aria-label="Export drawing"><Download aria-hidden="true" /></summary>
             <div className="export-sheet">

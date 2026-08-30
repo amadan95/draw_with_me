@@ -15,6 +15,8 @@ The default route is `openrouter/free`, which asks OpenRouter to select an avail
 - Browser-local persistence with IndexedDB
 - PNG and editable SVG export
 - Point-by-point AI drawing animation
+- Original illustrated pencil and eraser controls
+- Optional synthesized paper, tool-selection, and turn-taking sounds
 - OpenRouter OAuth PKCE connection or session-only pasted key
 - Configurable OpenRouter model and AI stroke limit
 - Static GitHub Pages deployment
@@ -48,6 +50,7 @@ pnpm build
 - OAuth or pasted OpenRouter keys are kept in `sessionStorage`.
 - Keys are not written to IndexedDB, URLs, exports, logs, analytics, or the repository.
 - Canvas strokes and non-secret settings stay in the visitor's browser.
+- Sound effects are generated locally with the Web Audio API; no audio files or external media requests are used.
 - There is no project backend that can observe or store drawings.
 
 ## License

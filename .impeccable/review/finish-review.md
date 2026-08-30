@@ -11,6 +11,7 @@ pass — `PRODUCT.md`, the `src/App.tsx` surface brief, the approved composition
 | Continuous-grid topology | match | Desktop and mobile captures show an edge-to-edge grid with no closed canvas boundary, implementing the user's latest explicit direction. |
 | Expansive drawing surface | match | The warm grid is the dominant first-viewport surface at both breakpoints and continues behind the floating rail. |
 | Physical bottom tool rail | match | Blush floating rail, grouped pencil/eraser, round color wells, utility controls, and dark turn control preserve the comp's order and hierarchy. |
+| Object-like drawing tools | match | Original shaded pencil and two-material eraser artwork rise from the rail while retaining accessible button labels and state. |
 | Hand-lettered title | match | Gaegu preserves the loose, rounded, handwritten width and weight of the comp's lettering. |
 | TYPE | match | Display character is hand-drawn; Nunito keeps controls legible without competing with it. |
 | MATERIAL | acceptable adaptation | Paper fiber, quiet sage grid lines, floating rail, ambient shadows, and pressed states translate the painted reference after the user removed both the room and closed board boundary. |
@@ -19,7 +20,7 @@ pass — `PRODUCT.md`, the `src/App.tsx` surface brief, the approved composition
 
 ## ceiling
 
-reached — the build uses the world's paper fiber, handwritten display voice, tonal depth, round wells, physical pressed action, and point-by-point companion motion. No separate QUALITY BAR card was provided; the approved composition and later continuous-grid override served as the visual ceiling.
+reached — the build uses the world's paper fiber, handwritten display voice, illustrated tools, tonal depth, round wells, physical pressed action, locally synthesized material sounds, and point-by-point companion motion. No separate QUALITY BAR card was provided; the approved composition and later continuous-grid override served as the visual ceiling.
 
 ## material_fixes
 

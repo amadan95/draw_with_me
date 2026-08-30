@@ -1,4 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { studioSounds } from './sounds'
 import type { Point, Stroke, Tool } from './types'
 
 export type DrawingCanvasHandle = {
@@ -123,6 +124,7 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, Props>(function Dra
   const begin = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (disabled) return
     event.currentTarget.setPointerCapture(event.pointerId)
+    studioSounds.drawStart(tool)
     const point = pointFromEvent(event)
     if (tool === 'eraser') {
       onErase(point)
@@ -135,6 +137,7 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, Props>(function Dra
 
   const move = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (disabled || !event.currentTarget.hasPointerCapture(event.pointerId)) return
+    studioSounds.stroke(tool)
     const point = pointFromEvent(event)
     if (tool === 'eraser') {
       onErase(point)
