@@ -14,7 +14,7 @@ The default route is `openrouter/free`, which asks OpenRouter to select an avail
 - Pen, eraser, four-color palette, undo, redo, and clear
 - Browser-local persistence with IndexedDB
 - PNG and editable SVG export
-- Point-by-point AI drawing animation
+- Visible AI pencil that traces resampled strokes point by point, with natural pauses, pressure variation, and slight human wobble
 - Original illustrated pencil and eraser controls
 - Optional synthesized paper, tool-selection, and turn-taking sounds
 - OpenRouter OAuth PKCE connection or session-only pasted key

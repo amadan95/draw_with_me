@@ -70,7 +70,7 @@ The world is tactile but restrained. Texture is fine and low-contrast, depth has
 - Warm, muted art-supply colors replace software chrome.
 - Handwritten display type is reserved for moments of invitation.
 - Pencil and eraser controls read as small illustrated objects resting in the rail.
-- The AI turn feels like pressing a studio control and watching another hand draw.
+- The AI turn feels like pressing a studio control and watching another hand draw: an illustrated pencil follows a resampled, subtly imperfect path with small pauses and pressure changes.
 
 ## Colors
 

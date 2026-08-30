@@ -122,6 +122,44 @@ h1 {
 .drawing-canvas.tool-pen { cursor: crosshair; }
 .drawing-canvas.tool-eraser { cursor: cell; }
 
+.companion-pencil {
+  --cursor-angle: 25deg;
+  position: absolute;
+  z-index: 4;
+  width: 42px;
+  height: 62px;
+  pointer-events: none;
+  transform: translate(-50%, -3px) rotate(var(--cursor-angle));
+  transform-origin: 50% 3px;
+  transition: left 24ms linear, top 24ms linear, transform 90ms ease-out;
+  filter: drop-shadow(0 7px 4px rgba(62, 47, 37, .22));
+  animation: pencil-arrive 180ms ease-out both;
+}
+
+.companion-pencil .tool-art {
+  display: block;
+  width: 42px;
+  height: 61px;
+}
+
+.cursor-contact {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 7px;
+  height: 7px;
+  border: 2px solid rgba(255, 250, 242, .9);
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 1px 4px rgba(55, 43, 35, .32);
+  transform: translate(-50%, -50%);
+}
+
+@keyframes pencil-arrive {
+  from { opacity: 0; transform: translate(-50%, 8px) rotate(calc(var(--cursor-angle) + 5deg)) scale(.92); }
+  to { opacity: 1; transform: translate(-50%, -3px) rotate(var(--cursor-angle)) scale(1); }
+}
+
 .empty-hint {
   position: absolute;
   left: 50%;
@@ -359,6 +397,8 @@ h1 {
 }
 
 @media (max-width: 560px) {
+  .companion-pencil { width: 35px; height: 52px; }
+  .companion-pencil .tool-art { width: 35px; height: 51px; }
   .connection-chip { width: 44px; padding: 0; justify-content: center; }
   .connection-chip span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   .tool-rail { grid-template-columns: auto 1px 1fr auto; }

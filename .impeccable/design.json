@@ -21,7 +21,7 @@
     ],
     "motion": [
       { "name": "companion-turn", "value": "1.1s ease-in-out", "purpose": "A restrained rotation and scale pulse while the model prepares strokes." },
-      { "name": "stroke-reveal", "value": "18ms per two points", "purpose": "Makes AI marks appear as a turn rather than a stamped result." }
+      { "name": "stroke-reveal", "value": "24ms per resampled point with brief hesitations", "purpose": "Lets a visible illustrated pencil trace subtly imperfect AI marks instead of stamping a result." }
     ],
     "breakpoints": [
       { "name": "compact-rail", "value": "900px" },

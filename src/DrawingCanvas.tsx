@@ -19,22 +19,20 @@ type Props = {
 
 function drawStroke(context: CanvasRenderingContext2D, stroke: Stroke, width: number, height: number) {
   if (stroke.points.length < 2) return
-  context.beginPath()
   context.strokeStyle = stroke.color
-  context.lineWidth = stroke.width
   context.lineCap = 'round'
   context.lineJoin = 'round'
-  context.moveTo(stroke.points[0].x * width, stroke.points[0].y * height)
+
   for (let index = 1; index < stroke.points.length; index += 1) {
     const point = stroke.points[index]
     const previous = stroke.points[index - 1]
-    const middleX = ((previous.x + point.x) / 2) * width
-    const middleY = ((previous.y + point.y) / 2) * height
-    context.quadraticCurveTo(previous.x * width, previous.y * height, middleX, middleY)
+    const pressure = ((previous.pressure ?? .5) + (point.pressure ?? .5)) / 2
+    context.beginPath()
+    context.lineWidth = stroke.width * (.8 + pressure * .4)
+    context.moveTo(previous.x * width, previous.y * height)
+    context.lineTo(point.x * width, point.y * height)
+    context.stroke()
   }
-  const last = stroke.points[stroke.points.length - 1]
-  context.lineTo(last.x * width, last.y * height)
-  context.stroke()
 }
 
 function download(href: string, filename: string, revoke = false) {

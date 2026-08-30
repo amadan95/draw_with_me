@@ -20,7 +20,7 @@ Draw With Me is a shared sketch surface where a person and an AI companion take 
 
 ## Positioning
 
-The conversation is embodied in editable drawing strokes rather than chat messages or generated bitmap images. Models propose structured drawing actions; the browser validates, renders, animates, stores, and exports them locally.
+The conversation is embodied in editable drawing strokes rather than chat messages or generated bitmap images. Models propose structured drawing actions; the browser validates, resamples, subtly humanizes, animates with a visible pencil, stores, and exports them locally.
 
 ## Operating Context
 
@@ -34,6 +34,7 @@ Visitors draw with a mouse, touch, or stylus, then explicitly invite the AI to t
 - AI models must accept image input and return tool calls or reliably structured JSON to participate directly.
 - The canvas, history, settings, and credentials remain client-side. API keys must never enter the URL, repository, exports, logs, or analytics.
 - Original, optional sound cues reinforce drawing, erasing, selection, undo/redo, and AI turn-taking without loading third-party media.
+- AI marks arrive as a legible performance: a visible pencil follows each path with restrained wobble, pressure variation, and short pauses instead of stamping the finished result onto the grid.
 - Human and AI marks remain distinguishable in state, individually undoable, and editable by the renderer.
 - The application must preserve work across refreshes and handle offline, cancelled, malformed, unavailable, and rate-limited AI turns safely.
 

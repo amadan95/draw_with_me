@@ -12,6 +12,41 @@ import { COLORS, DEFAULT_SETTINGS, type Point, type Settings, type Stroke, type 
 
 const sleep = (milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 
+type CompanionCursor = { x: number; y: number; color: string; angle: number }
+
+function humanizeStroke(stroke: Stroke): Stroke {
+  if (stroke.points.length < 2) return stroke
+
+  const points: Point[] = []
+  let phase = stroke.id.split('').reduce((total, character) => total + character.charCodeAt(0), 0) * 0.17
+
+  for (let segmentIndex = 1; segmentIndex < stroke.points.length; segmentIndex += 1) {
+    const start = stroke.points[segmentIndex - 1]
+    const end = stroke.points[segmentIndex]
+    const deltaX = end.x - start.x
+    const deltaY = end.y - start.y
+    const distance = Math.hypot(deltaX, deltaY)
+    const steps = Math.max(3, Math.ceil(distance / 0.0075))
+    const normalX = distance ? -deltaY / distance : 0
+    const normalY = distance ? deltaX / distance : 0
+
+    for (let step = segmentIndex === 1 ? 0 : 1; step <= steps; step += 1) {
+      const progress = step / steps
+      const eased = progress * progress * (3 - 2 * progress)
+      const taper = Math.sin(progress * Math.PI)
+      const wobble = Math.sin(phase + step * 0.82) * 0.0018 * taper
+      points.push({
+        x: Math.min(1, Math.max(0, start.x + deltaX * eased + normalX * wobble)),
+        y: Math.min(1, Math.max(0, start.y + deltaY * eased + normalY * wobble)),
+        pressure: 0.42 + Math.sin(phase + step * 0.31) * 0.08,
+      })
+    }
+    phase += steps * 0.61
+  }
+
+  return { ...stroke, points }
+}
+
 function distanceToStroke(point: Point, stroke: Stroke) {
   return stroke.points.reduce((closest, candidate) => Math.min(closest, Math.hypot(point.x - candidate.x, point.y - candidate.y)), Number.POSITIVE_INFINITY)
 }
@@ -29,6 +64,7 @@ export default function App() {
   const [draftKey, setDraftKey] = useState('')
   const [status, setStatus] = useState('Your turn — make a mark')
   const [thinking, setThinking] = useState(false)
+  const [companionCursor, setCompanionCursor] = useState<CompanionCursor | null>(null)
   const [hydrated, setHydrated] = useState(false)
 
   useEffect(() => {
@@ -129,7 +165,8 @@ export default function App() {
       setFuture([])
       let animated = [...strokes]
       const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches
-      for (const incoming of result.strokes) {
+      for (const rawStroke of result.strokes) {
+        const incoming = humanizeStroke(rawStroke)
         if (reduceMotion) {
           animated = [...animated, incoming]
           setStrokes(animated)
@@ -137,21 +174,32 @@ export default function App() {
         }
         const partial: Stroke = { ...incoming, points: incoming.points.slice(0, 1) }
         animated = [...animated, partial]
-        for (let index = 2; index <= incoming.points.length; index += 2) {
+        setStrokes(animated)
+        setStatus('Your companion is drawing…')
+        setCompanionCursor({ ...incoming.points[0], color: incoming.color, angle: 25 })
+        await sleep(220)
+        for (let index = 2; index <= incoming.points.length; index += 1) {
+          const currentPoint = incoming.points[index - 1]
+          const previousPoint = incoming.points[Math.max(0, index - 2)]
+          const direction = Math.atan2(currentPoint.y - previousPoint.y, currentPoint.x - previousPoint.x) * (180 / Math.PI)
           animated = [...animated.slice(0, -1), { ...incoming, points: incoming.points.slice(0, index) }]
           setStrokes(animated)
+          setCompanionCursor({ ...currentPoint, color: incoming.color, angle: 25 + Math.max(-9, Math.min(9, direction * 0.08)) })
           studioSounds.stroke('pen')
-          await sleep(18)
+          await sleep(24 + (index % 9 === 0 ? 20 : 0))
         }
         animated = [...animated.slice(0, -1), incoming]
         setStrokes(animated)
+        await sleep(180)
       }
+      setCompanionCursor(null)
       setStatus(`${result.thought} Your turn.`)
       studioSounds.returnTurn(true)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'The AI turn failed. Your drawing is safe.')
       studioSounds.returnTurn(false)
     } finally {
+      setCompanionCursor(null)
       setThinking(false)
     }
   }
@@ -168,6 +216,20 @@ export default function App() {
         </div>
         <div className="drawing-grid">
           <DrawingCanvas ref={canvasRef} strokes={strokes} tool={tool} color={color} disabled={thinking} onCommit={addStroke} onErase={eraseAt} />
+          {companionCursor && (
+            <div
+              className="companion-pencil"
+              style={{
+                left: `${companionCursor.x * 100}%`,
+                top: `${companionCursor.y * 100}%`,
+                '--cursor-angle': `${companionCursor.angle}deg`,
+              } as React.CSSProperties}
+              aria-hidden="true"
+            >
+              <PencilArtwork color={companionCursor.color} />
+              <span className="cursor-contact" />
+            </div>
+          )}
           {!strokes.length && (
             <div className="empty-hint" aria-hidden="true">
               <Pencil size={28} />
