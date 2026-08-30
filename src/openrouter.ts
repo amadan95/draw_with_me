@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { COLORS, type Settings, type Stroke } from './types'
+import { COLORS, DEFAULT_MODEL, type Settings, type Stroke } from './types'
 
 const KEY_NAME = 'draw-with-me-openrouter-key'
 const VERIFIER_NAME = 'draw-with-me-pkce-verifier'
@@ -63,7 +63,8 @@ function normalizeColor(color: string) {
 }
 
 export async function requestAiStrokes(key: string, snapshot: string, settings: Settings): Promise<{ strokes: Stroke[]; thought: string }> {
-  const compatibilityMode = (settings.model || 'openrouter/free') === 'openrouter/free'
+  const selectedModel = settings.model || DEFAULT_MODEL
+  const compatibilityMode = selectedModel === 'openrouter/free'
   const schemaInstruction = `Return only one JSON object with this exact shape: {"thought":"short friendly description","strokes":[{"color":"one of ${COLORS.join(', ')}","width":4,"points":[{"x":0.1,"y":0.1},{"x":0.2,"y":0.2}]}]}. Include 1 to ${settings.maxStrokes} strokes. Each stroke needs 2 to 100 points. Every x and y must be a number from 0 to 1. Do not wrap the JSON in markdown.`
   const tool = {
     type: 'function',
@@ -101,7 +102,7 @@ export async function requestAiStrokes(key: string, snapshot: string, settings: 
       'X-Title': 'Draw With Me',
     },
     body: JSON.stringify({
-      model: settings.model || 'openrouter/free',
+      model: selectedModel,
       temperature: settings.creativity,
       messages: [{
         role: 'user',
@@ -120,7 +121,7 @@ export async function requestAiStrokes(key: string, snapshot: string, settings: 
   if (!response.ok) {
     const detail = await response.json().catch(() => null) as { error?: { message?: string } } | null
     if (response.status === 401) throw new Error('OpenRouter rejected this key. Reconnect it in Settings and try again.')
-    if (response.status === 402) throw new Error('This model requires credits. Keep the model set to openrouter/free.')
+    if (response.status === 402) throw new Error('This model requires credits. Choose an OpenRouter model whose ID ends in :free.')
     if (response.status === 429) throw new Error('The free model is busy or its daily limit was reached. Wait a moment and try again.')
     if (detail?.error?.message === 'Provider returned error') throw new Error('The free provider rejected this turn. Try again to let OpenRouter choose another compatible provider.')
     throw new Error(detail?.error?.message || `The AI turn failed with OpenRouter status ${response.status}. Your drawing is safe.`)

@@ -8,7 +8,7 @@ import { finishOpenRouterConnect, getOpenRouterKey, requestAiStrokes, setOpenRou
 import { studioSounds } from './sounds'
 import { loadWorkspace, saveWorkspace } from './storage'
 import { EraserArtwork, PencilArtwork } from './ToolArtwork'
-import { COLORS, DEFAULT_SETTINGS, type Point, type Settings, type Stroke, type Tool } from './types'
+import { COLORS, DEFAULT_MODEL, DEFAULT_SETTINGS, type Point, type Settings, type Stroke, type Tool } from './types'
 
 const sleep = (milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 
@@ -70,7 +70,10 @@ export default function App() {
   useEffect(() => {
     loadWorkspace().then((saved) => {
       if (saved?.strokes) setStrokes(saved.strokes)
-      if (saved?.settings) setSettings({ ...DEFAULT_SETTINGS, ...saved.settings })
+      if (saved?.settings) {
+        const savedModel = saved.settings.model === 'openrouter/free' ? DEFAULT_MODEL : saved.settings.model
+        setSettings({ ...DEFAULT_SETTINGS, ...saved.settings, model: savedModel })
+      }
     }).catch(() => setStatus('Drawing is ready, but local saving is unavailable.'))
       .finally(() => setHydrated(true))
 
@@ -316,7 +319,7 @@ export default function App() {
           <div className="settings-grid">
             <label>
               Model
-              <input value={settings.model} onChange={(event) => setSettings((current) => ({ ...current, model: event.target.value }))} placeholder="openrouter/free" />
+              <input value={settings.model} onChange={(event) => setSettings((current) => ({ ...current, model: event.target.value }))} placeholder={DEFAULT_MODEL} />
             </label>
             <label>
               Max AI strokes

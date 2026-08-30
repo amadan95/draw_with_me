@@ -19,8 +19,10 @@ export type Settings = {
 
 export const COLORS = ['#84a59d', '#e07a5f', '#f2b84b', '#3d405b'] as const
 
+export const DEFAULT_MODEL = 'google/gemma-4-31b-it:free'
+
 export const DEFAULT_SETTINGS: Settings = {
-  model: 'openrouter/free',
+  model: DEFAULT_MODEL,
   creativity: 0.7,
   maxStrokes: 8,
   soundEnabled: true,

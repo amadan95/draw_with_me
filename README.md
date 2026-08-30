@@ -6,7 +6,7 @@ A browser-based drawing board where a person and an AI companion take turns addi
 
 This app is a static site with no server, database, project-owned API key, or paid infrastructure. It can be hosted on GitHub Pages. Drawing is always available without an account. When a visitor asks the AI to take a turn, they connect their own OpenRouter account or paste their own OpenRouter key for that browser tab.
 
-The default route is `openrouter/free`, which asks OpenRouter to select an available free model. Free model availability and limits belong to OpenRouter and can change. The app never promises unlimited inference and never falls back to a project-funded key.
+The default model is `google/gemma-4-31b-it:free`, selected for its image understanding and native function calling. Free model availability and limits belong to OpenRouter and can change. The app never promises unlimited inference and never falls back to a project-funded key.
 
 ## Features
 
@@ -25,7 +25,7 @@ The default route is `openrouter/free`, which asks OpenRouter to select an avail
 
 The browser sends a snapshot of the current canvas to a vision-capable OpenRouter model. Specific models use a `draw_strokes` tool call; `openrouter/free` uses a more widely compatible JSON-only response so OpenRouter has a larger pool of free vision providers to choose from. The model returns normalized points, colors, and widths. The browser validates and clamps that response before rendering it as local vector strokes. The model does not replace the canvas with a generated image.
 
-Because models differ, use a vision-capable model that supports tool calling. `openrouter/free` is the zero-cost default; a visitor can enter a specific free model ID in Settings when the free router does not select a compatible model.
+Because models differ, use a vision-capable model that supports tool calling. `google/gemma-4-31b-it:free` is the zero-cost default; a visitor can enter another compatible model ID in Settings.
 
 ## Local development
 
