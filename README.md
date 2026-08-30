@@ -23,7 +23,7 @@ The default route is `openrouter/free`, which asks OpenRouter to select an avail
 
 ## How the AI draws
 
-The browser sends a snapshot of the current canvas to a vision-capable OpenRouter model and requires a `draw_strokes` tool call. The model returns normalized points, colors, and widths. The browser validates and clamps that response before rendering it as local vector strokes. The model does not replace the canvas with a generated image.
+The browser sends a snapshot of the current canvas to a vision-capable OpenRouter model. Specific models use a `draw_strokes` tool call; `openrouter/free` uses a more widely compatible JSON-only response so OpenRouter has a larger pool of free vision providers to choose from. The model returns normalized points, colors, and widths. The browser validates and clamps that response before rendering it as local vector strokes. The model does not replace the canvas with a generated image.
 
 Because models differ, use a vision-capable model that supports tool calling. `openrouter/free` is the zero-cost default; a visitor can enter a specific free model ID in Settings when the free router does not select a compatible model.
 

@@ -63,6 +63,8 @@ function normalizeColor(color: string) {
 }
 
 export async function requestAiStrokes(key: string, snapshot: string, settings: Settings): Promise<{ strokes: Stroke[]; thought: string }> {
+  const compatibilityMode = (settings.model || 'openrouter/free') === 'openrouter/free'
+  const schemaInstruction = `Return only one JSON object with this exact shape: {"thought":"short friendly description","strokes":[{"color":"one of ${COLORS.join(', ')}","width":4,"points":[{"x":0.1,"y":0.1},{"x":0.2,"y":0.2}]}]}. Include 1 to ${settings.maxStrokes} strokes. Each stroke needs 2 to 100 points. Every x and y must be a number from 0 to 1. Do not wrap the JSON in markdown.`
   const tool = {
     type: 'function',
     function: {
@@ -104,24 +106,39 @@ export async function requestAiStrokes(key: string, snapshot: string, settings: 
       messages: [{
         role: 'user',
         content: [
-          { type: 'text', text: `Study this drawing and take one modest turn. Add, complement, or playfully respond to what is already there. Do not redraw, erase, frame, caption, or cover the person's work. Use no more than ${settings.maxStrokes} simple strokes. Coordinates must be normalized from 0 to 1.` },
+          { type: 'text', text: `Study this drawing and take one modest turn. Add, complement, or playfully respond to what is already there. Do not redraw, erase, frame, caption, or cover the person's work. Use no more than ${settings.maxStrokes} simple strokes. Coordinates must be normalized from 0 to 1. ${compatibilityMode ? schemaInstruction : ''}` },
           { type: 'image_url', image_url: { url: snapshot } },
         ],
       }],
-      tools: [tool],
-      tool_choice: { type: 'function', function: { name: 'draw_strokes' } },
+      ...(compatibilityMode ? {} : {
+        tools: [tool],
+        tool_choice: { type: 'function', function: { name: 'draw_strokes' } },
+      }),
     }),
   })
 
   if (!response.ok) {
     const detail = await response.json().catch(() => null) as { error?: { message?: string } } | null
-    throw new Error(detail?.error?.message || (response.status === 429 ? 'The free model is busy. Wait a moment or choose another free model.' : 'The AI turn could not be completed. Your drawing is safe.'))
+    if (response.status === 401) throw new Error('OpenRouter rejected this key. Reconnect it in Settings and try again.')
+    if (response.status === 402) throw new Error('This model requires credits. Keep the model set to openrouter/free.')
+    if (response.status === 429) throw new Error('The free model is busy or its daily limit was reached. Wait a moment and try again.')
+    if (detail?.error?.message === 'Provider returned error') throw new Error('The free provider rejected this turn. Try again to let OpenRouter choose another compatible provider.')
+    throw new Error(detail?.error?.message || `The AI turn failed with OpenRouter status ${response.status}. Your drawing is safe.`)
   }
   const data = await response.json() as { choices?: Array<{ message?: { content?: string; tool_calls?: Array<{ function?: { arguments?: string } }> } }> }
   const message = data.choices?.[0]?.message
   const raw = message?.tool_calls?.[0]?.function?.arguments ?? message?.content
   if (!raw) throw new Error('The model replied without drawing instructions. Try another free model.')
-  const parsed = responseSchema.parse(JSON.parse(raw))
+  const jsonText = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
+  const objectStart = jsonText.indexOf('{')
+  const objectEnd = jsonText.lastIndexOf('}')
+  if (objectStart < 0 || objectEnd <= objectStart) throw new Error('The free model replied without usable drawing instructions. Try the AI turn again.')
+  let parsed: z.infer<typeof responseSchema>
+  try {
+    parsed = responseSchema.parse(JSON.parse(jsonText.slice(objectStart, objectEnd + 1)))
+  } catch {
+    throw new Error('The free model returned malformed drawing instructions. Try again to use another provider.')
+  }
   const strokes = parsed.strokes.slice(0, settings.maxStrokes).map((stroke, index): Stroke => ({
     id: `ai-${Date.now()}-${index}`,
     author: 'ai',
